@@ -70,6 +70,10 @@ web_modules/
 .env.*
 !.env.example
 
+# MCP server config — contains plaintext API keys.
+# Copy from .mcp.json.example and paste your own pa_<64hex> key.
+.mcp.json
+
 # parcel-bundler cache (https://parceljs.org/)
 .cache
 .parcel-cache
