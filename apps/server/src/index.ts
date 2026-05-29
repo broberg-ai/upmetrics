@@ -1,3 +1,12 @@
-// @upmetrics/server — Hono backend (ingest, grouping, probes, incidents, auth).
-// The Hono app bootstrap + /health land in F001.3; this is the skeleton entry point.
-export const APP_NAME = '@upmetrics/server';
+// @upmetrics/server entry point — boots the Hono app on Bun's native server.
+import { createApp } from './app';
+import { config } from './config';
+
+const app = createApp();
+
+console.log(`@upmetrics/server listening on :${config.port} (${config.nodeEnv})`);
+
+export default {
+  port: config.port,
+  fetch: app.fetch,
+};
