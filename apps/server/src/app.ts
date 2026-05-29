@@ -2,9 +2,12 @@
 // in later stories (F002+); this is the skeleton with /health + error handling.
 import { Hono } from 'hono';
 import { auth } from './auth';
+import { registerIngestRoutes } from './ingest/routes';
 
 export function createApp() {
   const app = new Hono();
+
+  registerIngestRoutes(app);
 
   app.get('/health', (c) =>
     c.json({ status: 'ok', service: '@upmetrics/server', ts: Date.now() }),

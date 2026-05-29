@@ -11,4 +11,11 @@ export function createDb(path: string = process.env.DATABASE_PATH ?? './local.db
 }
 
 export type Db = ReturnType<typeof createDb>;
+
+// Process-wide singleton for request handlers.
+let _db: Db | undefined;
+export function getDb(): Db {
+  return (_db ??= createDb());
+}
+
 export { schema };
