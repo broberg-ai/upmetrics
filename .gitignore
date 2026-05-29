@@ -148,3 +148,9 @@ vite.config.ts.timestamp-*
 
 # Turbo build cache
 .turbo/
+
+# SQLite databases
+*.db
+*.db-shm
+*.db-wal
+local.db
