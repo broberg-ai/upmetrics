@@ -4,11 +4,35 @@
 export interface AgentConfig {
   baseUrl: string; // e.g. https://upmetrics.org
   apiKey: string; // project api_key (X-Upmetrics-Key)
+  /**
+   * Compliance mode (F003.4 / FysioDK). When true, NEVER send prompt/response
+   * excerpts to Upmetrics and tag every run compliance:'gdpr-health'. The app
+   * keeps its own legally-binding audit log; Upmetrics holds sanitized telemetry.
+   */
+  complianceMode?: boolean;
 }
 
 let config: AgentConfig | null = null;
 export function configureAgent(cfg: AgentConfig): void {
   config = cfg;
+}
+
+// Structured-only record the app persists synchronously in its OWN audit log.
+// Never contains prompt/response text or cleartext user data.
+export interface AuditRecord {
+  timestamp: string;
+  agent_kind: string;
+  agent_name: string;
+  purpose?: string;
+  provider: string;
+  model: string;
+  tier?: string;
+  status: string;
+  input_tokens: number;
+  output_tokens: number;
+  cost_usd: number;
+  duration_ms: number;
+  error_class?: string;
 }
 
 export interface AgentMeta {
@@ -40,10 +64,18 @@ export interface AgentMetrics {
 
 async function post(body: Record<string, unknown>): Promise<any> {
   if (!config) throw new Error('@upmetrics/agent: call configureAgent() first');
+  let payload = body;
+  if (config.complianceMode) {
+    // Force-strip excerpts and tag as gdpr-health, regardless of caller input.
+    const { prompt_excerpt, response_excerpt, tags, ...rest } = body as Record<string, unknown>;
+    void prompt_excerpt;
+    void response_excerpt;
+    payload = { ...rest, tags: { ...((tags as Record<string, unknown>) ?? {}), compliance: 'gdpr-health' } };
+  }
   const res = await fetch(`${config.baseUrl}/api/agent`, {
     method: 'POST',
     headers: { 'content-type': 'application/json', 'x-upmetrics-key': config.apiKey },
-    body: JSON.stringify(body),
+    body: JSON.stringify(payload),
   });
   return res.json().catch(() => ({}));
 }
@@ -60,8 +92,21 @@ export interface AgentRunCtx {
   setResponseExcerpt(text: string): void;
 }
 
-// Lifecycle wrapper: start → run fn → finish (success/error). Returns fn result.
-export async function agentRun<T>(meta: AgentMeta, fn: (ctx: AgentRunCtx) => Promise<T>): Promise<T> {
+// Lifecycle wrapper: start → run fn → finish (success/error). Returns fn result,
+// or { result, auditRecord } when opts.returnAuditRecord is set (F003.4) — the
+// auditRecord is structured-only (no prompt/response) for the app's own log.
+export async function agentRun<T>(meta: AgentMeta, fn: (ctx: AgentRunCtx) => Promise<T>): Promise<T>;
+export async function agentRun<T>(
+  meta: AgentMeta,
+  fn: (ctx: AgentRunCtx) => Promise<T>,
+  opts: { returnAuditRecord: true },
+): Promise<{ result: T; auditRecord: AuditRecord }>;
+export async function agentRun<T>(
+  meta: AgentMeta,
+  fn: (ctx: AgentRunCtx) => Promise<T>,
+  opts?: { returnAuditRecord?: boolean },
+): Promise<T | { result: T; auditRecord: AuditRecord }> {
+  const startedAtMs = Date.now();
   const started = await post({ mode: 'start', ...meta });
   const runId = started?.run_id as string | undefined;
 
@@ -92,12 +137,30 @@ export async function agentRun<T>(meta: AgentMeta, fn: (ctx: AgentRunCtx) => Pro
   const finish = (status: string, extra: Partial<AgentMetrics> = {}) =>
     post({ mode: 'finish', run_id: runId, status, ...acc, tool_calls: [...tools.values()], ...extra });
 
+  const buildAudit = (status: string, errorClass?: string): AuditRecord => ({
+    timestamp: new Date(startedAtMs).toISOString(),
+    agent_kind: meta.agent_kind,
+    agent_name: meta.agent_name,
+    purpose: meta.purpose,
+    provider: meta.provider,
+    model: meta.model,
+    tier: meta.tier,
+    status,
+    input_tokens: acc.input_tokens ?? 0,
+    output_tokens: acc.output_tokens ?? 0,
+    cost_usd: acc.cost_usd ?? 0,
+    duration_ms: Date.now() - startedAtMs,
+    error_class: errorClass,
+  });
+
   try {
     const result = await fn(ctx);
     await finish('success');
+    if (opts?.returnAuditRecord) return { result, auditRecord: buildAudit('success') };
     return result;
   } catch (err) {
-    await finish('error', { response_excerpt: err instanceof Error ? err.message : String(err) });
+    // In compliance mode never send the error message; only status=error is recorded.
+    await finish('error', config?.complianceMode ? {} : { response_excerpt: err instanceof Error ? err.message : String(err) });
     throw err;
   }
 }
