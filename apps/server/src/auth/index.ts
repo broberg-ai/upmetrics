@@ -26,6 +26,7 @@ export const auth = betterAuth({
   },
   plugins: [
     magicLink({
+      expiresIn: 60 * 15, // 15 min — roomy enough for manual click-through
       sendMagicLink: async ({ email, url }) => {
         // Allowlist gate: non-allowlisted requests get no link and an error.
         if (!isAllowlisted(email)) {
