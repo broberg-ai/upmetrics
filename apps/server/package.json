@@ -15,7 +15,9 @@
     "typescript": "^5.7.2"
   },
   "dependencies": {
+    "better-auth": "^1.6.11",
     "drizzle-orm": "^0.45.2",
-    "hono": "^4.12.23"
+    "hono": "^4.12.23",
+    "resend": "^6.12.4"
   }
 }

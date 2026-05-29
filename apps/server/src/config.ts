@@ -12,6 +12,11 @@ export const config = {
   nodeEnv: process.env.NODE_ENV ?? 'development',
   port: int('PORT', 3017),
   databasePath: process.env.DATABASE_PATH ?? './local.db',
+  // Auth (F001.4). Secrets come from .env.local (dev) / fly secrets (prod).
+  authBaseUrl: process.env.AUTH_BASE_URL ?? `http://localhost:${int('PORT', 3017)}`,
+  authSecret: process.env.AUTH_SECRET ?? 'dev-only-secret-change-in-prod',
+  authEmailFrom: process.env.AUTH_EMAIL_FROM ?? 'Upmetrics <upmetrics@webhouse.dk>',
+  resendApiKey: process.env.RESEND_API_KEY ?? '',
 } as const;
 
 export type Config = typeof config;
