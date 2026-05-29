@@ -5,6 +5,7 @@ import type { Context, Hono } from 'hono';
 import { eq } from 'drizzle-orm';
 import { getDb, schema } from '../db';
 import { parseEnvelope, extractPublicKey, type EnvelopeItem } from './envelope';
+import { groupEvent } from './grouping';
 
 // Item types we persist vs. drop (PLAN §7).
 const STORED = new Set(['event', 'transaction', 'check_in']);
@@ -67,15 +68,18 @@ export function registerIngestRoutes(app: Hono): void {
         continue;
       }
       const p = (item.payload ?? {}) as Record<string, unknown>;
+      const occurred = occurredAt(item);
+      // Only error events group into issues (F002.2). transaction/check_in store raw.
+      const issueId = item.type === 'event' ? groupEvent(db, project.id, p, occurred) : null;
       db.insert(schema.events)
         .values({
           id: eventId(item, env.headers),
           projectId: project.id,
           kind: item.type === 'event' ? 'error' : item.type,
           receivedAt: now,
-          occurredAt: occurredAt(item),
+          occurredAt: occurred,
           payload: p,
-          issueId: null,
+          issueId,
           release: typeof p['release'] === 'string' ? (p['release'] as string) : null,
           environment: typeof p['environment'] === 'string' ? (p['environment'] as string) : null,
           tags: (p['tags'] as Record<string, string>) ?? null,
