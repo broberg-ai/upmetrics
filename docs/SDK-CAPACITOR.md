@@ -36,6 +36,41 @@ handler. Options for a future phase:
 
 This is **explicitly out of scope for Phase 1**. Phase 1 = our SDK, JS errors.
 
+## Verified test target: cms-mobile (non-App-Store Capacitor app)
+
+`/Users/cb/Apps/webhouse/cms/packages/cms-mobile` — Capacitor (React + TS),
+bundle `app.webhouse.cms`, **not published to the App Store** (sideloaded /
+Phase-8-future), so it's free to instrument and test. Init point:
+`src/main.tsx` (right after `initCapacitor()`):
+
+```ts
+import { init } from '@upmetrics/sdk';
+init({
+  dsn: 'https://<publicKey>@upmetrics.org/cms-mobile',
+  environment: import.meta.env.MODE,
+  release: `cms-mobile@${appVersion}`,
+});
+```
+
+An upmetrics project `cms-mobile` (platform `capacitor`) exists with its own DSN.
+
+**Live-verified 2026-05-30:** the real `@upmetrics/sdk` (the exact code a
+Capacitor WebView runs) captured a JS error and it landed in the `cms-mobile`
+project's upmetrics `issues` on prod — grouped into
+*"Error: CmsMobileBoom…"* (level error), event `environment=capacitor-test`,
+`issue_id` stamped by the async grouping worker. The SDK ↔ ingest ↔ issues
+contract is proven end-to-end against production.
+
+## Cross-repo consumption prerequisite
+
+`@upmetrics/sdk` currently lives as a workspace package in the upmetrics
+monorepo. To `import { init } from '@upmetrics/sdk'` from **another** repo
+(cms-mobile, and every other site/app per the F008 "embed everywhere" goal) it
+must be **published** — npm (public or private/GitHub Packages) or a tarball.
+That publish step is the real enabler for wiring the SDK into cms-mobile's
+`main.tsx` and running it in the simulator/WebView. Until then the contract is
+proven via the SDK executed directly against prod (above).
+
 ## Note
 
 The Upmetrics ingest is Sentry-envelope-compatible (F002.1), so it *can* accept
