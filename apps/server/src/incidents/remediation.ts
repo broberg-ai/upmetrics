@@ -31,7 +31,7 @@ export async function runRemediation(db: Db, now: Date = new Date()): Promise<Re
     const project = db.select().from(schema.projects).where(eq(schema.projects.id, inc.projectId)).get();
     if (!project?.remediationWebhookUrl) continue;
     r.scanned++;
-    await dispatch(db, inc, project, now);
+    await dispatchRemediation(db, inc, project, now);
     r.dispatched++;
   }
   return r;
@@ -40,7 +40,7 @@ export async function runRemediation(db: Db, now: Date = new Date()): Promise<Re
 type Incident = typeof schema.incidents.$inferSelect;
 type Project = typeof schema.projects.$inferSelect;
 
-async function dispatch(db: Db, incident: Incident, project: Project, now: Date): Promise<void> {
+export async function dispatchRemediation(db: Db, incident: Incident, project: Project, now: Date): Promise<void> {
   const token = crypto.randomUUID().replace(/-/g, '');
   const recentEvents = db
     .select({ id: schema.events.id, kind: schema.events.kind, occurredAt: schema.events.occurredAt, issueId: schema.events.issueId })

@@ -5,6 +5,8 @@ import type { Context, Hono } from 'hono';
 import { and, desc, eq, gte, lte, sql } from 'drizzle-orm';
 import { getDb, schema } from '../db';
 import { auth } from '../auth';
+import { deleteProbeJob, setProbeJobEnabled } from '../probes/cronjobs';
+import { dispatchRemediation } from '../incidents/remediation';
 
 async function requireUser(c: Context): Promise<boolean> {
   const session = await auth.api.getSession({ headers: c.req.raw.headers });
@@ -236,5 +238,126 @@ export function registerDashboardRoutes(app: Hono): void {
       .orderBy(schema.agentRuns.startedAt)
       .all();
     return c.json({ runs });
+  });
+
+  // ── Probes (F006.5) ───────────────────────────────────────────────────────
+  // Grid — each probe + its last 20 results (for the sparkline).
+  app.get('/api/dashboard/probes', async (c) => {
+    if (!(await requireUser(c))) return c.json({ error: 'unauthorized' }, 401);
+    const db = getDb();
+    const probes = db.select().from(schema.probes).all();
+    const rows = probes.map((p) => {
+      const recent = db
+        .select({ ok: schema.probeResults.ok, responseMs: schema.probeResults.responseMs, checkedAt: schema.probeResults.checkedAt })
+        .from(schema.probeResults)
+        .where(eq(schema.probeResults.probeId, p.id))
+        .orderBy(desc(schema.probeResults.checkedAt))
+        .limit(20)
+        .all();
+      return { ...p, recent: recent.reverse() };
+    });
+    return c.json({ probes: rows });
+  });
+
+  // Probe detail — full result history (last 100).
+  app.get('/api/dashboard/probes/:id', async (c) => {
+    if (!(await requireUser(c))) return c.json({ error: 'unauthorized' }, 401);
+    const db = getDb();
+    const probe = db.select().from(schema.probes).where(eq(schema.probes.id, c.req.param('id'))).get();
+    if (!probe) return c.json({ error: 'not_found' }, 404);
+    const history = db
+      .select()
+      .from(schema.probeResults)
+      .where(eq(schema.probeResults.probeId, probe.id))
+      .orderBy(desc(schema.probeResults.checkedAt))
+      .limit(100)
+      .all();
+    const lastFailure = db
+      .select()
+      .from(schema.probeResults)
+      .where(and(eq(schema.probeResults.probeId, probe.id), eq(schema.probeResults.ok, false)))
+      .orderBy(desc(schema.probeResults.checkedAt))
+      .get();
+    return c.json({ probe, history: history.reverse(), last_failure: lastFailure ?? null });
+  });
+
+  // Pause / resume — toggles the cronjobs trigger job.
+  app.post('/api/dashboard/probes/:id/pause', async (c) => {
+    if (!(await requireUser(c))) return c.json({ error: 'unauthorized' }, 401);
+    const db = getDb();
+    const probe = db.select().from(schema.probes).where(eq(schema.probes.id, c.req.param('id'))).get();
+    if (!probe) return c.json({ error: 'not_found' }, 404);
+    if (probe.cronjobsJobId) await setProbeJobEnabled(probe.cronjobsJobId, false).catch(() => {});
+    db.update(schema.probes).set({ status: 'paused' }).where(eq(schema.probes.id, probe.id)).run();
+    return c.json({ ok: true });
+  });
+  app.post('/api/dashboard/probes/:id/resume', async (c) => {
+    if (!(await requireUser(c))) return c.json({ error: 'unauthorized' }, 401);
+    const db = getDb();
+    const probe = db.select().from(schema.probes).where(eq(schema.probes.id, c.req.param('id'))).get();
+    if (!probe) return c.json({ error: 'not_found' }, 404);
+    if (probe.cronjobsJobId) await setProbeJobEnabled(probe.cronjobsJobId, true).catch(() => {});
+    db.update(schema.probes).set({ status: 'up' }).where(eq(schema.probes.id, probe.id)).run();
+    return c.json({ ok: true });
+  });
+  // Delete — cascades to cronjobs job + result history (F004).
+  app.delete('/api/dashboard/probes/:id', async (c) => {
+    if (!(await requireUser(c))) return c.json({ error: 'unauthorized' }, 401);
+    const db = getDb();
+    const probe = db.select().from(schema.probes).where(eq(schema.probes.id, c.req.param('id'))).get();
+    if (!probe) return c.json({ error: 'not_found' }, 404);
+    if (probe.cronjobsJobId) await deleteProbeJob(probe.cronjobsJobId).catch(() => {});
+    db.delete(schema.probeResults).where(eq(schema.probeResults.probeId, probe.id)).run();
+    db.delete(schema.probes).where(eq(schema.probes.id, probe.id)).run();
+    return c.json({ ok: true });
+  });
+
+  // ── Incidents (F006.5) ────────────────────────────────────────────────────
+  app.get('/api/dashboard/incidents', async (c) => {
+    if (!(await requireUser(c))) return c.json({ error: 'unauthorized' }, 401);
+    const db = getDb();
+    const status = c.req.query('status');
+    const base = db.select().from(schema.incidents);
+    const rows = (status ? base.where(eq(schema.incidents.status, status)) : base).orderBy(desc(schema.incidents.openedAt)).limit(200).all();
+    return c.json({ incidents: rows });
+  });
+
+  app.get('/api/dashboard/incidents/:id', async (c) => {
+    if (!(await requireUser(c))) return c.json({ error: 'unauthorized' }, 401);
+    const db = getDb();
+    const incident = db.select().from(schema.incidents).where(eq(schema.incidents.id, c.req.param('id'))).get();
+    if (!incident) return c.json({ error: 'not_found' }, 404);
+    // trigger context: recent events for the project around the incident
+    const events = db
+      .select({ id: schema.events.id, kind: schema.events.kind, occurredAt: schema.events.occurredAt })
+      .from(schema.events)
+      .where(eq(schema.events.projectId, incident.projectId))
+      .orderBy(desc(schema.events.receivedAt))
+      .limit(10)
+      .all();
+    return c.json({ incident, trigger_events: events });
+  });
+
+  app.post('/api/dashboard/incidents/:id/status', async (c) => {
+    if (!(await requireUser(c))) return c.json({ error: 'unauthorized' }, 401);
+    const b = (await c.req.json().catch(() => ({}))) as { status?: string };
+    const status = String(b.status ?? '');
+    if (!['open', 'acknowledged', 'resolved'].includes(status)) return c.json({ error: 'bad_status' }, 400);
+    const set: Record<string, unknown> = { status };
+    if (status === 'resolved') set.resolvedAt = new Date();
+    getDb().update(schema.incidents).set(set).where(eq(schema.incidents.id, c.req.param('id'))).run();
+    return c.json({ ok: true });
+  });
+
+  // Manual remediation — force a (re-)dispatch regardless of threshold/dedup.
+  app.post('/api/dashboard/incidents/:id/remediate', async (c) => {
+    if (!(await requireUser(c))) return c.json({ error: 'unauthorized' }, 401);
+    const db = getDb();
+    const incident = db.select().from(schema.incidents).where(eq(schema.incidents.id, c.req.param('id'))).get();
+    if (!incident) return c.json({ error: 'not_found' }, 404);
+    const project = db.select().from(schema.projects).where(eq(schema.projects.id, incident.projectId)).get();
+    if (!project?.remediationWebhookUrl) return c.json({ error: 'no_remediation_webhook' }, 409);
+    await dispatchRemediation(db, incident, project, new Date());
+    return c.json({ ok: true });
   });
 }

@@ -55,3 +55,8 @@ export async function createProbeJob(
 export async function deleteProbeJob(jobId: string): Promise<void> {
   await cj(`/api/jobs/${jobId}`, { method: 'DELETE' });
 }
+
+// Pause/resume the trigger job (F006.5 dashboard actions).
+export async function setProbeJobEnabled(jobId: string, enabled: boolean): Promise<void> {
+  await cj(`/api/jobs/${jobId}`, { method: 'PUT', body: JSON.stringify({ enabled }) });
+}
