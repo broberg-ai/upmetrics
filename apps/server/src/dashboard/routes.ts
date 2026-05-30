@@ -2,7 +2,7 @@
 // Business logic stays server-side; the SPA only renders. All routes require a
 // valid Better Auth session (the dashboard cookie).
 import type { Context, Hono } from 'hono';
-import { and, desc, eq, gte, sql } from 'drizzle-orm';
+import { and, desc, eq, gte, lte, sql } from 'drizzle-orm';
 import { getDb, schema } from '../db';
 import { auth } from '../auth';
 
@@ -148,9 +148,15 @@ export function registerDashboardRoutes(app: Hono): void {
     const project = c.req.query('project');
     const agent = c.req.query('agent');
     const status = c.req.query('status');
+    const kind = c.req.query('kind');
+    const since = c.req.query('since');
+    const until = c.req.query('until');
     if (project) conds.push(eq(schema.agentRuns.projectId, project));
     if (agent) conds.push(eq(schema.agentRuns.agentName, agent));
     if (status) conds.push(eq(schema.agentRuns.status, status));
+    if (kind) conds.push(eq(schema.agentRuns.agentKind, kind));
+    if (since) conds.push(gte(schema.agentRuns.startedAt, new Date(since)));
+    if (until) conds.push(lte(schema.agentRuns.startedAt, new Date(until + 'T23:59:59.999Z')));
     const base = db.select().from(schema.agentRuns);
     const rows = (conds.length ? base.where(and(...conds)) : base).orderBy(desc(schema.agentRuns.startedAt)).limit(200).all();
     return c.json({ runs: rows });

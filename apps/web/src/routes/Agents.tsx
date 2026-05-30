@@ -7,6 +7,7 @@ import { useApi } from '../lib/useApi';
 import { fmtRel, usd } from '../lib/format';
 import { Card, Badge, Button } from '../components/ui/controls';
 import { CustomSelect } from '../components/ui/select';
+import { DatePicker } from '../components/ui/datepicker';
 import { Modal } from '../components/ui/modal';
 import { Loading, ErrorBox, Empty, PageHeader } from '../components/PageState';
 
@@ -56,6 +57,9 @@ export function Agents() {
   const [project, setProject] = useState<string | null>(null);
   const [agent, setAgent] = useState<string | null>(null);
   const [status, setStatus] = useState<string | null>(null);
+  const [kind, setKind] = useState<string | null>(null);
+  const [since, setSince] = useState<string | null>(null);
+  const [until, setUntil] = useState<string | null>(null);
   const [selRun, setSelRun] = useState<string | null>(null);
   const [selSession, setSelSession] = useState<string | null>(null);
 
@@ -66,7 +70,19 @@ export function Agents() {
   if (project) lq.set('project', project);
   if (agent) lq.set('agent', agent);
   if (status) lq.set('status', status);
+  if (kind) lq.set('kind', kind);
+  if (since) lq.set('since', since);
+  if (until) lq.set('until', until);
   const list = useApi<{ runs: Run[] }>(`/dashboard/agents?${lq.toString()}`);
+
+  const kindOpts = [
+    { value: '', label: 'All kinds' },
+    { value: 'cc', label: 'cc' },
+    { value: 'subagent', label: 'subagent' },
+    { value: 'chatbot', label: 'chatbot' },
+    { value: 'rag', label: 'rag' },
+    { value: 'embedding', label: 'embedding' },
+  ];
 
   const projectOpts = [{ value: '', label: 'All projects' }, ...(projects.data?.projects ?? []).map((p) => ({ value: p.id, label: p.name }))];
   const agentOpts = [{ value: '', label: 'All agents' }, ...(agg.data?.runs_per_agent ?? []).map((a) => ({ value: a.agent_name, label: a.agent_name }))];
@@ -146,6 +162,9 @@ export function Agents() {
           <h2 class="mr-2 text-sm font-medium">Recent runs</h2>
           <CustomSelect value={agent ?? ''} options={agentOpts} onChange={(v) => setAgent(v || null)} />
           <CustomSelect value={status ?? ''} options={statusOpts} onChange={(v) => setStatus(v || null)} />
+          <CustomSelect value={kind ?? ''} options={kindOpts} onChange={(v) => setKind(v || null)} />
+          <DatePicker value={since} onChange={setSince} placeholder="From…" />
+          <DatePicker value={until} onChange={setUntil} placeholder="To…" />
         </div>
         {list.loading ? (
           <Loading />
