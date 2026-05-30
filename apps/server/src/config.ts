@@ -20,6 +20,11 @@ export const config = {
   // Probes (F004): cronjobs.webhouse.net is the scheduler/trigger.
   cronjobsApiBase: process.env.CRONJOBS_API_BASE ?? 'https://cronjobs.webhouse.net',
   cronjobsApiToken: process.env.CRONJOBS_API_TOKEN ?? '',
+  // Incident correlation (F005.1).
+  correlationIntervalMs: int('CORRELATION_INTERVAL_MS', 30_000),
+  spikeWindowMs: int('SPIKE_WINDOW_MS', 300_000), // 5 min
+  errorSpikeThreshold: int('ERROR_SPIKE_THRESHOLD', 10),
+  agentFailureSpikeThreshold: int('AGENT_FAILURE_SPIKE_THRESHOLD', 5),
 } as const;
 
 export type Config = typeof config;
