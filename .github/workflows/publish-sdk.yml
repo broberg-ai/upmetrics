@@ -1,0 +1,52 @@
+name: publish-sdk
+
+# Publishes @upmetrics/sdk to npm. Two ways to trigger:
+#   • push a tag matching sdk-v*  (e.g. sdk-v0.1.0)  → publishes that commit
+#   • manual run (Actions → publish-sdk → Run workflow)
+#
+# Auth uses the NPM_TOKEN repo secret, which MUST be an npm *Automation* /
+# granular token with write access to @upmetrics — that token type is exempt
+# from 2FA, so CI never hits the OTP wall a local `npm publish` does.
+
+on:
+  push:
+    tags: ["sdk-v*"]
+  workflow_dispatch:
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+
+      # Version comes from the root package.json "packageManager" field
+      # (pnpm@10.30.3) — do NOT also pass a `version:` input or action-setup
+      # errors with "Multiple versions of pnpm specified".
+      - uses: pnpm/action-setup@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          registry-url: https://registry.npmjs.org
+
+      - name: Install
+        run: pnpm install --frozen-lockfile
+
+      - name: Build SDK
+        run: pnpm --filter @upmetrics/sdk build
+
+      - name: Guard — version not already on npm
+        run: |
+          PKG_VER=$(node -p "require('./packages/sdk/package.json').version")
+          if npm view "@upmetrics/sdk@$PKG_VER" version >/dev/null 2>&1; then
+            echo "::error::@upmetrics/sdk@$PKG_VER already published — bump the version first."
+            exit 1
+          fi
+          echo "Publishing @upmetrics/sdk@$PKG_VER"
+
+      - name: Publish
+        run: pnpm --filter @upmetrics/sdk publish --no-git-checks --access public
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
