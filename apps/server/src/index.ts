@@ -2,11 +2,15 @@
 import { createApp } from './app';
 import { config } from './config';
 import { startCorrelationWorker } from './incidents/correlation';
+import { initDogfood } from './dogfood';
 
 const app = createApp();
 
 // F005.1: background incident-correlation tick (every ~30s).
 startCorrelationWorker();
+
+// F009.1: dogfood — self-monitor via @upmetrics/sdk (no-op if SDK/DSN absent).
+void initDogfood();
 
 console.log(`@upmetrics/server listening on :${config.port} (${config.nodeEnv})`);
 

@@ -240,6 +240,13 @@ export function registerDashboardRoutes(app: Hono): void {
     return c.json({ runs });
   });
 
+  // Fake-crash trigger (F009.1 dogfood) — session-gated. Throws so app.onError
+  // captures it to the upmetrics self-project.
+  app.get('/api/debug/boom', async (c) => {
+    if (!(await requireUser(c))) return c.json({ error: 'unauthorized' }, 401);
+    throw new Error('Dogfood test crash 💥 — triggered from /api/debug/boom');
+  });
+
   // ── Probes (F006.5) ───────────────────────────────────────────────────────
   // Grid — each probe + its last 20 results (for the sparkline).
   app.get('/api/dashboard/probes', async (c) => {

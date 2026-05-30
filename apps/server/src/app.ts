@@ -8,6 +8,7 @@ import { registerAgentRoutes } from './ingest/agent';
 import { registerProbeRoutes } from './probes/routes';
 import { registerIncidentRoutes } from './incidents/routes';
 import { registerDashboardRoutes } from './dashboard/routes';
+import { captureSelf } from './dogfood';
 
 export function createApp() {
   const app = new Hono();
@@ -44,6 +45,8 @@ export function createApp() {
 
   app.onError((err, c) => {
     console.error('[server] unhandled error:', err);
+    // F009.1 dogfood: ship our own 500s to the upmetrics self-project.
+    captureSelf(err, { request: { url: c.req.url, method: c.req.method } });
     return c.json({ error: 'internal_error', message: err.message }, 500);
   });
 
