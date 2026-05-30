@@ -1,12 +1,15 @@
 name: publish-sdk
 
-# Publishes @upmetrics/sdk to npm. Two ways to trigger:
-#   • push a tag matching sdk-v*  (e.g. sdk-v0.1.0)  → publishes that commit
+# Publishes @upmetrics/sdk to npm via OIDC Trusted Publishing — NO token/secret.
+# Triggers:
+#   • push a tag matching sdk-v*  (e.g. sdk-v0.1.1)  → publishes that commit
 #   • manual run (Actions → publish-sdk → Run workflow)
 #
-# Auth uses the NPM_TOKEN repo secret, which MUST be an npm *Automation* /
-# granular token with write access to @upmetrics — that token type is exempt
-# from 2FA, so CI never hits the OTP wall a local `npm publish` does.
+# PREREQUISITE (one-time): the package must already exist on npm AND have a
+# Trusted Publisher configured at npmjs.com → @upmetrics/sdk → Settings →
+# Trusted Publisher = broberg-ai/upmetrics, workflow `publish-sdk.yml`.
+# npm has no "pending publisher", so v0.1.0 is bootstrapped once by hand;
+# every publish after that runs here with zero secrets (OIDC + provenance).
 
 on:
   push:
@@ -18,18 +21,22 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       contents: read
+      id-token: write # lets GitHub mint the OIDC token npm exchanges for publish
     steps:
       - uses: actions/checkout@v4
 
-      # Version comes from the root package.json "packageManager" field
-      # (pnpm@10.30.3) — do NOT also pass a `version:` input or action-setup
-      # errors with "Multiple versions of pnpm specified".
+      # Version from root package.json "packageManager" (pnpm@10.x) — no
+      # `version:` input, or action-setup errors "Multiple versions specified".
       - uses: pnpm/action-setup@v4
 
       - uses: actions/setup-node@v4
         with:
-          node-version: 22
+          node-version: 22 # resolves to >=22.14, required by OIDC publishing
           registry-url: https://registry.npmjs.org
+
+      # OIDC trusted publishing needs npm CLI >= 11.5.1; node 22 still ships 10.x.
+      - name: Upgrade npm
+        run: npm install -g npm@latest
 
       - name: Install
         run: pnpm install --frozen-lockfile
@@ -46,7 +53,7 @@ jobs:
           fi
           echo "Publishing @upmetrics/sdk@$PKG_VER"
 
-      - name: Publish
-        run: pnpm --filter @upmetrics/sdk publish --no-git-checks --access public
-        env:
-          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+      # npm (not pnpm) does the OIDC token exchange + provenance. No NODE_AUTH_TOKEN.
+      - name: Publish (OIDC)
+        run: npm publish --access public --provenance
+        working-directory: packages/sdk
