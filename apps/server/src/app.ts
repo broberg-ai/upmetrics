@@ -4,12 +4,14 @@ import { Hono } from 'hono';
 import { auth } from './auth';
 import { registerIngestRoutes } from './ingest/routes';
 import { registerAgentRoutes } from './ingest/agent';
+import { registerProbeRoutes } from './probes/routes';
 
 export function createApp() {
   const app = new Hono();
 
   registerIngestRoutes(app);
   registerAgentRoutes(app);
+  registerProbeRoutes(app);
 
   app.get('/health', (c) =>
     c.json({ status: 'ok', service: '@upmetrics/server', ts: Date.now() }),

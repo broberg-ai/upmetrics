@@ -17,6 +17,9 @@ export const config = {
   authSecret: process.env.AUTH_SECRET ?? 'dev-only-secret-change-in-prod',
   authEmailFrom: process.env.AUTH_EMAIL_FROM ?? 'Upmetrics <upmetrics@webhouse.dk>',
   resendApiKey: process.env.RESEND_API_KEY ?? '',
+  // Probes (F004): cronjobs.webhouse.net is the scheduler/trigger.
+  cronjobsApiBase: process.env.CRONJOBS_API_BASE ?? 'https://cronjobs.webhouse.net',
+  cronjobsApiToken: process.env.CRONJOBS_API_TOKEN ?? '',
 } as const;
 
 export type Config = typeof config;
