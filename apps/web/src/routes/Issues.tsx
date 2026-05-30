@@ -137,6 +137,7 @@ function IssueDetail({ id, onClose, onChanged }: { id: string; onClose: () => vo
   const [busy, setBusy] = useState(false);
   const toast = useToast();
 
+  const [assignee, setAssignee] = useState('');
   const setStatus = async (status: string) => {
     setBusy(true);
     try {
@@ -146,6 +147,19 @@ function IssueDetail({ id, onClose, onChanged }: { id: string; onClose: () => vo
       onChanged();
     } catch {
       toast('Action failed', 'error');
+    } finally {
+      setBusy(false);
+    }
+  };
+  const assign = async () => {
+    setBusy(true);
+    try {
+      await api(`/dashboard/issues/${id}/assign`, { method: 'POST', body: JSON.stringify({ assignee: assignee.trim() || null }) });
+      toast(assignee.trim() ? `Assigned to ${assignee.trim()}` : 'Unassigned', 'success');
+      reload();
+      onChanged();
+    } catch {
+      toast('Assign failed', 'error');
     } finally {
       setBusy(false);
     }
@@ -229,6 +243,19 @@ function IssueDetail({ id, onClose, onChanged }: { id: string; onClose: () => vo
             </Button>
             <Button variant="ghost" loading={busy} onClick={() => setStatus('unresolved')}>
               Reopen
+            </Button>
+          </div>
+
+          <div class="flex items-center gap-2">
+            <input
+              value={assignee}
+              onInput={(e) => setAssignee((e.target as HTMLInputElement).value)}
+              placeholder={data.issue.assignee ? `Assigned: ${data.issue.assignee}` : 'Assign to (email)…'}
+              class="flex-1 rounded-md border px-3 py-1.5 text-sm focus:outline-none focus-visible:ring-2 focus-visible:ring-[var(--primary)]"
+              style={{ background: 'var(--bg)', borderColor: 'var(--border)' }}
+            />
+            <Button variant="outline" loading={busy} onClick={assign}>
+              Assign
             </Button>
           </div>
         </div>
