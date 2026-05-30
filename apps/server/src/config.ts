@@ -17,6 +17,7 @@ export const config = {
   authSecret: process.env.AUTH_SECRET ?? 'dev-only-secret-change-in-prod',
   authEmailFrom: process.env.AUTH_EMAIL_FROM ?? 'Upmetrics <upmetrics@webhouse.dk>',
   resendApiKey: process.env.RESEND_API_KEY ?? '',
+  resendApiBase: process.env.RESEND_API_BASE ?? 'https://api.resend.com',
   // Probes (F004): cronjobs.webhouse.net is the scheduler/trigger.
   cronjobsApiBase: process.env.CRONJOBS_API_BASE ?? 'https://cronjobs.webhouse.net',
   cronjobsApiToken: process.env.CRONJOBS_API_TOKEN ?? '',
@@ -25,6 +26,8 @@ export const config = {
   spikeWindowMs: int('SPIKE_WINDOW_MS', 300_000), // 5 min
   errorSpikeThreshold: int('ERROR_SPIKE_THRESHOLD', 10),
   agentFailureSpikeThreshold: int('AGENT_FAILURE_SPIKE_THRESHOLD', 5),
+  // Alert engine (F005.2). Dedup window per (rule, incident, severity).
+  alertDedupWindowMs: int('ALERT_DEDUP_WINDOW_MS', 3_600_000), // 1h
 } as const;
 
 export type Config = typeof config;

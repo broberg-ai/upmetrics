@@ -12,6 +12,7 @@
 import { and, eq, gte, inArray, sql } from 'drizzle-orm';
 import { getDb, schema } from '../db';
 import { config } from '../config';
+import { runAlerts } from './alerts';
 
 type Db = ReturnType<typeof getDb>;
 type Severity = 'critical' | 'high' | 'medium' | 'low';
@@ -202,7 +203,9 @@ export function startCorrelationWorker(): void {
   if (timer) return;
   timer = setInterval(() => {
     try {
-      runCorrelation(getDb());
+      const db = getDb();
+      runCorrelation(db); // F005.1 — derive/correlate incidents (sync)
+      void runAlerts(db).catch((err) => console.error('[alerts] tick failed:', err)); // F005.2 — deliver
     } catch (err) {
       console.error('[correlation] tick failed:', err);
     }
