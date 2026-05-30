@@ -30,6 +30,13 @@ fi
 repo=$(resolve_repo)
 branch=$(git rev-parse --abbrev-ref HEAD 2>/dev/null || echo "main")
 
+# F075.5 — pass our applied template version (from the marker the daemon writes
+# on Update templates) so the server can flag whether we're behind canonical.
+tmpl_version=""
+if [[ -f "$DIR/../.cardmem-templates.json" ]]; then
+  tmpl_version=$(jq -r '.version // empty' "$DIR/../.cardmem-templates.json" 2>/dev/null || echo "")
+fi
+
 args=$(
   jq -nc \
     --arg sid "$session_id" \
@@ -39,13 +46,15 @@ args=$(
     --arg spawnedCard "${CARDMEM_SPAWNED_CARD_ID:-${PROJECTS_SPAWNED_CARD_ID:-}}" \
     --arg spawnedBranch "${CARDMEM_SPAWNED_BRANCH:-${PROJECTS_SPAWNED_BRANCH:-}}" \
     --arg parent "${CARDMEM_PARENT_SESSION_ID:-${PROJECTS_PARENT_SESSION_ID:-}}" \
+    --arg tmplVersion "$tmpl_version" \
     '{ session_id: $sid }
        + (if $repo  != "" then { repo:  $repo  } else {} end)
        + (if $branch!= "" then { branch:$branch} else {} end)
        + (if $buddy != "" then { buddy_session_name: $buddy } else {} end)
        + (if $spawnedCard  != "" then { spawned_card_id: $spawnedCard } else {} end)
        + (if $spawnedBranch!= "" then { spawned_branch: $spawnedBranch } else {} end)
-       + (if $parent       != "" then { parent_session_id: $parent } else {} end)'
+       + (if $parent       != "" then { parent_session_id: $parent } else {} end)
+       + (if $tmplVersion  != "" then { template_version: $tmplVersion } else {} end)'
 )
 
 result=$(call_mcp cardmem_session_start "$args")
@@ -104,6 +113,14 @@ if [[ -n "$snapshot" ]]; then
   printf '  Resumed from last snapshot:\n'
   [[ -n "$snap_fnums" && "$snap_fnums" != "null" ]] && printf '    in-progress: %s\n' "$snap_fnums"
   [[ -n "$snap_notes" ]] && printf '    notes: %s\n' "$snap_notes"
+fi
+
+# F075.5 — at-launch nudge if this repo's templates are behind canonical.
+# The exact stale-file list comes from the cardmem audit (scanLocal, F075.2).
+tmpl_outdated=$(printf '%s' "$result" | jq -r '.templates.templates_outdated // false')
+if [[ "$tmpl_outdated" == "true" ]]; then
+  cur=$(printf '%s' "$result" | jq -r '.templates.current_semver // .templates.current_version // "?"')
+  printf '  ⚠ Templates outdated vs canonical v%s — run the cardmem audit / Update templates.\n' "$cur"
 fi
 
 printf '\n  Tools available via projects MCP. /board /pickup /handoff for shortcuts.\n'
