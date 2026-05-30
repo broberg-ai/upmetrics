@@ -126,18 +126,37 @@ function send(event: Record<string, unknown>): string | null {
 }
 
 function installAutoInstrument(): void {
-  const g = globalThis as unknown as {
-    addEventListener?: (t: string, h: (e: any) => void) => void;
-  };
-  if (typeof g.addEventListener !== 'function') return;
+  const g = globalThis as any;
 
-  g.addEventListener('error', (e: any) => {
-    if (e?.error) captureException(e.error);
-    else if (e?.message) captureMessage(String(e.message), 'error');
-  });
-  g.addEventListener('unhandledrejection', (e: any) => {
-    captureException(e?.reason ?? new Error('unhandledrejection'));
-  });
+  // window.onerror + unhandledrejection (browser; node/bun may lack these).
+  if (typeof g.addEventListener === 'function') {
+    g.addEventListener('error', (e: any) => {
+      if (e?.error) captureException(e.error);
+      else if (e?.message) captureMessage(String(e.message), 'error');
+    });
+    g.addEventListener('unhandledrejection', (e: any) => {
+      captureException(e?.reason ?? new Error('unhandledrejection'));
+    });
+  }
+
+  // Failed-fetch capture (browser/node/bun). Wrap once; skip our OWN ingest
+  // endpoint to avoid infinite recursion on the envelope POST.
+  if (typeof g.fetch === 'function' && !g.__upmetricsFetchWrapped) {
+    const orig = g.fetch.bind(g);
+    g.__upmetricsFetchWrapped = true;
+    g.fetch = async (...args: any[]) => {
+      const url = typeof args[0] === 'string' ? args[0] : (args[0]?.url ?? '');
+      const own = Boolean(config && url.includes(config.parsed.endpoint));
+      try {
+        const res = await orig(...args);
+        if (!own && res && res.ok === false) captureMessage(`HTTP ${res.status} on ${url}`, 'warning');
+        return res;
+      } catch (err) {
+        if (!own) captureException(err);
+        throw err;
+      }
+    };
+  }
 }
 
 export { scrub, maskString } from './scrub';

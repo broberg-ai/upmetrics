@@ -2,13 +2,20 @@
 import { Resend } from 'resend';
 import { config } from '../config';
 
-const resend = new Resend(config.resendApiKey);
+// Lazy: instantiating Resend with an empty key throws, which would crash the
+// whole server at import time. Build it on first send and fail with a clear
+// message if the key is missing.
+let _resend: Resend | null = null;
+function getResend(): Resend {
+  if (!config.resendApiKey) throw new Error('RESEND_API_KEY is not set — cannot send magic-link email');
+  return (_resend ??= new Resend(config.resendApiKey));
+}
 
 export async function sendMagicLinkEmail(to: string, url: string): Promise<void> {
   // Ensure post-verify lands on the '/' page (302) instead of raw JSON when the
   // caller didn't supply a callbackURL (no frontend yet — see F006).
   const link = url.includes('callbackURL=') ? url : `${url}${url.includes('?') ? '&' : '?'}callbackURL=/`;
-  const { error } = await resend.emails.send({
+  const { error } = await getResend().emails.send({
     from: config.authEmailFrom,
     to,
     subject: 'Your Upmetrics sign-in link',

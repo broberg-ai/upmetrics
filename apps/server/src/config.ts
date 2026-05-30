@@ -30,4 +30,15 @@ export const config = {
   alertDedupWindowMs: int('ALERT_DEDUP_WINDOW_MS', 3_600_000), // 1h
 } as const;
 
+// Fail fast in production with a CLEAR error if a required secret is missing or
+// still the dev default — never silently ship with insecure defaults.
+if (config.nodeEnv === 'production') {
+  const missing: string[] = [];
+  if (!config.authSecret || config.authSecret === 'dev-only-secret-change-in-prod') missing.push('AUTH_SECRET');
+  if (!config.resendApiKey) missing.push('RESEND_API_KEY');
+  if (missing.length) {
+    throw new Error(`Missing required production env: ${missing.join(', ')} — set via fly secrets before deploy.`);
+  }
+}
+
 export type Config = typeof config;

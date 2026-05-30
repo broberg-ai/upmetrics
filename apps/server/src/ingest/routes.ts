@@ -58,35 +58,49 @@ export function registerIngestRoutes(app: Hono): void {
     let dropped = 0;
     const now = new Date();
 
+    // Insert events immediately; grouping is handed off async below so the
+    // caller never blocks on it (F002.1 / epic constraint). Error events land
+    // with issue_id null and get stamped by the deferred grouping pass.
+    const toGroup: Array<{ id: string; payload: Record<string, unknown>; occurred: Date }> = [];
     for (const item of env.items) {
-      if (DROPPED.has(item.type)) {
-        dropped++;
-        continue;
-      }
-      if (!STORED.has(item.type)) {
+      if (DROPPED.has(item.type) || !STORED.has(item.type)) {
         dropped++;
         continue;
       }
       const p = (item.payload ?? {}) as Record<string, unknown>;
       const occurred = occurredAt(item);
-      // Only error events group into issues (F002.2). transaction/check_in store raw.
-      const issueId = item.type === 'event' ? groupEvent(db, project.id, p, occurred) : null;
+      const id = eventId(item, env.headers);
       db.insert(schema.events)
         .values({
-          id: eventId(item, env.headers),
+          id,
           projectId: project.id,
           kind: item.type === 'event' ? 'error' : item.type,
           receivedAt: now,
           occurredAt: occurred,
           payload: p,
-          issueId,
+          issueId: null,
           release: typeof p['release'] === 'string' ? (p['release'] as string) : null,
           environment: typeof p['environment'] === 'string' ? (p['environment'] as string) : null,
           tags: (p['tags'] as Record<string, string>) ?? null,
         })
         .onConflictDoNothing()
         .run();
+      if (item.type === 'event') toGroup.push({ id, payload: p, occurred });
       accepted++;
+    }
+
+    // Async hand-off: group + stamp issue_id without blocking the response.
+    if (toGroup.length) {
+      queueMicrotask(() => {
+        for (const g of toGroup) {
+          try {
+            const issueId = groupEvent(db, project.id, g.payload, g.occurred);
+            db.update(schema.events).set({ issueId }).where(eq(schema.events.id, g.id)).run();
+          } catch (err) {
+            console.error('[grouping] failed for', g.id, err);
+          }
+        }
+      });
     }
 
     return c.json({ accepted, dropped });
