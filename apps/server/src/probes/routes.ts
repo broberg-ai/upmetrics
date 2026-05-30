@@ -75,6 +75,8 @@ export function registerProbeRoutes(app: Hono): void {
       .get();
     if (!probe) return c.json({ error: 'unknown_probe' }, 404);
     if (probe.cronjobsJobId) await deleteProbeJob(probe.cronjobsJobId).catch(() => {});
+    // probe_results FK-references the probe; clear history before deleting the probe.
+    db.delete(schema.probeResults).where(eq(schema.probeResults.probeId, probe.id)).run();
     db.delete(schema.probes).where(eq(schema.probes.id, probe.id)).run();
     return c.json({ ok: true });
   });
