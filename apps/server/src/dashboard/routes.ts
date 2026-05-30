@@ -138,4 +138,97 @@ export function registerDashboardRoutes(app: Hono): void {
     getDb().update(schema.issues).set({ assignee: b.assignee ?? null }).where(eq(schema.issues.id, c.req.param('id'))).run();
     return c.json({ ok: true });
   });
+
+  // ── Agents (F006.4) — the §8 differentiator ──────────────────────────────
+  // Runs list with filters.
+  app.get('/api/dashboard/agents', async (c) => {
+    if (!(await requireUser(c))) return c.json({ error: 'unauthorized' }, 401);
+    const db = getDb();
+    const conds = [];
+    const project = c.req.query('project');
+    const agent = c.req.query('agent');
+    const status = c.req.query('status');
+    if (project) conds.push(eq(schema.agentRuns.projectId, project));
+    if (agent) conds.push(eq(schema.agentRuns.agentName, agent));
+    if (status) conds.push(eq(schema.agentRuns.status, status));
+    const base = db.select().from(schema.agentRuns);
+    const rows = (conds.length ? base.where(and(...conds)) : base).orderBy(desc(schema.agentRuns.startedAt)).limit(200).all();
+    return c.json({ runs: rows });
+  });
+
+  // Aggregates answering the §8 use cases (cost/day, per-agent, success rate,
+  // p95/long-running). Computed in JS over the last 14 days — low volume.
+  app.get('/api/dashboard/agents/aggregates', async (c) => {
+    if (!(await requireUser(c))) return c.json({ error: 'unauthorized' }, 401);
+    const db = getDb();
+    const project = c.req.query('project');
+    const since = new Date(Date.now() - 14 * 86400_000);
+    const conds = [gte(schema.agentRuns.startedAt, since)];
+    if (project) conds.push(eq(schema.agentRuns.projectId, project));
+    const runs = db.select().from(schema.agentRuns).where(and(...conds)).all();
+
+    const FAIL = new Set(['error', 'timeout', 'max_turns', 'abandoned']);
+    const dayMap = new Map<string, number>();
+    const agentMap = new Map<string, { runs: number; success: number; totalMs: number; cost: number }>();
+    const durations: number[] = [];
+    let totalCost = 0;
+    let success = 0;
+    for (const r of runs) {
+      const day = new Date(r.startedAt).toISOString().slice(0, 10);
+      dayMap.set(day, (dayMap.get(day) ?? 0) + r.costUsd);
+      const a = agentMap.get(r.agentName) ?? { runs: 0, success: 0, totalMs: 0, cost: 0 };
+      a.runs++;
+      if (!FAIL.has(r.status)) a.success++;
+      a.totalMs += r.durationMs ?? 0;
+      a.cost += r.costUsd;
+      agentMap.set(r.agentName, a);
+      if (r.durationMs) durations.push(r.durationMs);
+      totalCost += r.costUsd;
+      if (!FAIL.has(r.status)) success++;
+    }
+    durations.sort((x, y) => x - y);
+    const p95 = durations.length ? durations[Math.min(durations.length - 1, Math.floor(0.95 * durations.length))] : 0;
+
+    // 14-day cost series, zero-filled.
+    const costPerDay: { day: string; cost: number }[] = [];
+    for (let i = 13; i >= 0; i--) {
+      const day = new Date(Date.now() - i * 86400_000).toISOString().slice(0, 10);
+      costPerDay.push({ day, cost: Number((dayMap.get(day) ?? 0).toFixed(4)) });
+    }
+
+    return c.json({
+      overall: {
+        total_runs: runs.length,
+        success_rate: runs.length ? Math.round((success / runs.length) * 100) : null,
+        avg_duration_ms: runs.length ? Math.round(durations.reduce((s, d) => s + d, 0) / (durations.length || 1)) : 0,
+        p95_duration_ms: p95,
+        max_duration_ms: durations.length ? durations[durations.length - 1] : 0,
+        total_cost: Number(totalCost.toFixed(4)),
+      },
+      cost_per_day: costPerDay,
+      runs_per_agent: [...agentMap.entries()]
+        .map(([name, a]) => ({ agent_name: name, runs: a.runs, success_rate: Math.round((a.success / a.runs) * 100), avg_duration_ms: Math.round(a.totalMs / a.runs), cost: Number(a.cost.toFixed(4)) }))
+        .sort((x, y) => y.runs - x.runs),
+    });
+  });
+
+  // Single run detail (tool calls + token breakdown).
+  app.get('/api/dashboard/agents/run/:id', async (c) => {
+    if (!(await requireUser(c))) return c.json({ error: 'unauthorized' }, 401);
+    const run = getDb().select().from(schema.agentRuns).where(eq(schema.agentRuns.id, c.req.param('id'))).get();
+    if (!run) return c.json({ error: 'not_found' }, 404);
+    return c.json({ run });
+  });
+
+  // Session view — all runs sharing a session_id, oldest first.
+  app.get('/api/dashboard/agents/session/:sid', async (c) => {
+    if (!(await requireUser(c))) return c.json({ error: 'unauthorized' }, 401);
+    const runs = getDb()
+      .select()
+      .from(schema.agentRuns)
+      .where(eq(schema.agentRuns.sessionId, c.req.param('sid')))
+      .orderBy(schema.agentRuns.startedAt)
+      .all();
+    return c.json({ runs });
+  });
 }
