@@ -70,6 +70,8 @@ async function tcpCheck(target: string, timeoutMs: number, start: number): Promi
           socket.end();
           done({ ok: true, responseMs: Date.now() - start });
         },
+        // Bun.connect requires a data (or drain) handler; we only check connectivity.
+        data() {},
         error(_s: any, err: Error) {
           clearTimeout(timer);
           done({ ok: false, responseMs: Date.now() - start, error: err.message });
