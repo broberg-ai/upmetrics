@@ -7,6 +7,7 @@ import { and, eq } from 'drizzle-orm';
 import { getDb, schema } from '../db';
 import { config } from '../config';
 import { createProbeJob, deleteProbeJob } from './cronjobs';
+import { runCheck } from './check';
 
 function projectFromKey(c: Context) {
   const key = c.req.header('x-upmetrics-key');
@@ -78,14 +79,84 @@ export function registerProbeRoutes(app: Hono): void {
     return c.json({ ok: true });
   });
 
-  // Run trigger — called by cronjobs on schedule. Full check logic is F004.2.
-  app.get('/api/probes/:id/run', (c) => {
+  // Run trigger — called by cronjobs on schedule (F004.2). Performs the actual
+  // check, records the result, updates status, opens/auto-resolves probe_down.
+  app.get('/api/probes/:id/run', async (c) => {
     const db = getDb();
     const probe = db.select().from(schema.probes).where(eq(schema.probes.id, c.req.param('id'))).get();
     if (!probe) return c.json({ error: 'unknown_probe' }, 404);
-    const cfg = (probe.config ?? {}) as Record<string, unknown>;
+    const cfg = (probe.config ?? {}) as Record<string, any>;
     if (c.req.query('key') !== cfg.runToken) return c.json({ error: 'bad_run_key' }, 401);
-    // F004.2 performs the actual HTTP/TCP/keyword/SSL check + records the result.
-    return c.json({ ok: true, probe_id: probe.id, note: 'check logic lands in F004.2' });
+
+    const result = await runCheck(probe);
+    const now = new Date();
+    const threshold = Number(cfg.failure_threshold ?? 3);
+
+    db.insert(schema.probeResults)
+      .values({
+        id: crypto.randomUUID(),
+        probeId: probe.id,
+        checkedAt: now,
+        ok: result.ok,
+        responseMs: result.responseMs ?? null,
+        statusCode: result.statusCode ?? null,
+        error: result.error ?? null,
+      })
+      .run();
+
+    if (result.ok) {
+      db.update(schema.probes)
+        .set({ status: 'up', consecutiveFailures: 0, lastCheckAt: now, lastResponseMs: result.responseMs ?? null })
+        .where(eq(schema.probes.id, probe.id))
+        .run();
+      // Auto-resolve any open probe_down incident for this probe.
+      db.update(schema.incidents)
+        .set({ status: 'resolved', resolvedAt: now })
+        .where(
+          and(
+            eq(schema.incidents.triggerRef, probe.id),
+            eq(schema.incidents.kind, 'probe_down'),
+            eq(schema.incidents.status, 'open'),
+          ),
+        )
+        .run();
+    } else {
+      const failures = probe.consecutiveFailures + 1;
+      db.update(schema.probes)
+        .set({ status: failures >= threshold ? 'down' : 'degraded', consecutiveFailures: failures, lastCheckAt: now })
+        .where(eq(schema.probes.id, probe.id))
+        .run();
+
+      if (failures >= threshold) {
+        const open = db
+          .select()
+          .from(schema.incidents)
+          .where(
+            and(
+              eq(schema.incidents.triggerRef, probe.id),
+              eq(schema.incidents.kind, 'probe_down'),
+              eq(schema.incidents.status, 'open'),
+            ),
+          )
+          .get();
+        if (!open) {
+          db.insert(schema.incidents)
+            .values({
+              id: crypto.randomUUID(),
+              projectId: probe.projectId,
+              kind: 'probe_down',
+              status: 'open',
+              severity: 'high',
+              title: `${probe.name} is down`,
+              openedAt: now,
+              triggerRef: probe.id,
+              eventsAtOpen: { consecutive_failures: failures, last_error: result.error ?? null },
+            })
+            .run();
+        }
+      }
+    }
+
+    return c.json({ ok: result.ok, status_code: result.statusCode, response_ms: result.responseMs, error: result.error });
   });
 }
