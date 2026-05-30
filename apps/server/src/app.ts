@@ -6,6 +6,7 @@ import { registerIngestRoutes } from './ingest/routes';
 import { registerAgentRoutes } from './ingest/agent';
 import { registerProbeRoutes } from './probes/routes';
 import { registerIncidentRoutes } from './incidents/routes';
+import { registerDashboardRoutes } from './dashboard/routes';
 
 export function createApp() {
   const app = new Hono();
@@ -14,6 +15,7 @@ export function createApp() {
   registerAgentRoutes(app);
   registerProbeRoutes(app);
   registerIncidentRoutes(app);
+  registerDashboardRoutes(app);
 
   app.get('/health', (c) =>
     c.json({ status: 'ok', service: '@upmetrics/server', ts: Date.now() }),
