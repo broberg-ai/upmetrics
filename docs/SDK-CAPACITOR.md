@@ -1,70 +1,44 @@
-# Capacitor apps → Upmetrics (F003.3)
+# Capacitor apps → Upmetrics (F003.3, re-scoped per decision 2026-05-30)
 
-Christian's Capacitor apps (iOS + Android) report errors to Upmetrics using the
-**official `@sentry/capacitor` SDK** pointed at an Upmetrics DSN. We do not build
-a native SDK — Upmetrics' ingest is Sentry-envelope-compatible (F002.1), so the
-Sentry SDK treats it as a Sentry server.
+**Decision (Christian):** Upmetrics does **not** ship a competitor's SDK
+(`@sentry/capacitor`) into our apps. We use **our own `@upmetrics/sdk`**. Native
+iOS/Android crash capture is a deliberate **future** decision, not Phase 1.
 
-## Pinned version
+## What Capacitor apps do (when they opt in — not now)
 
-`@sentry/capacitor` **v2.x** (wraps `@sentry/cocoa` on iOS, `@sentry/android` on
-Android). Pin the major and upgrade explicitly — do not float.
-
-## Install (in the Capacitor app, e.g. `fysiodk-aalborg-sport/apps/web`)
-
-```bash
-pnpm add @sentry/capacitor @sentry/vue   # or @sentry/react / @sentry/angular per app
-```
-
-## Init
+A Capacitor app runs JS in a WebView. JS/TS errors are captured by our own SDK,
+exactly like any web app:
 
 ```ts
-import * as Sentry from '@sentry/capacitor';
+import { init, captureException } from '@upmetrics/sdk';
 
-Sentry.init({
-  // Upmetrics DSN for this project: https://<publicKey>@upmetrics.org/<projectId>
+init({
   dsn: 'https://<publicKey>@upmetrics.org/<projectId>',
-  environment: import.meta.env.MODE,
+  environment: 'production',
   release: `${appName}@${appVersion}`,
-  // Standard tag convention so the dashboard can filter native vs web:
-  initialScope: {
-    tags: { platform: 'capacitor', app_version: appVersion },
-  },
 });
+// window.onerror + unhandledrejection are auto-instrumented.
 ```
 
-## What works out of the box
+That covers all JavaScript-layer errors in the Capacitor WebView. **No
+`@sentry/capacitor`, no competitor dependency, no native rebuild required beyond
+shipping the JS bundle.**
 
-- JS errors in the Capacitor WebView (`platform: javascript`)
-- Native iOS crashes (objc/Swift, e.g. `EXC_BAD_ACCESS`) — `platform: cocoa`
-- Native Android crashes (JVM + NDK) — `platform: android`
-- Breadcrumbs, user context, release tags
+## Native crashes (deferred — future decision)
 
-## Upmetrics-side verification (done, protocol-level)
+Native iOS (Swift/objc) and Android (JVM/NDK) crashes happen *outside* the
+WebView, so the JS SDK can't see them. Capturing those requires a native crash
+handler. Options for a future phase:
 
-The ingest endpoint was verified to accept and group both shapes:
+- Build a minimal `@upmetrics/capacitor` plugin with our own native crash
+  handlers (most work, fully ours).
+- Revisit whether native-crash coverage is worth a third-party dependency.
 
-- JS event (`platform: javascript`, `level: error`) → issue created
-- Native event (`platform: cocoa`, `EXC_BAD_ACCESS`, `mechanism.handled=false`,
-  `level: fatal`) → issue created
+This is **explicitly out of scope for Phase 1**. Phase 1 = our SDK, JS errors.
 
-i.e. `@sentry/capacitor` output (including native crash envelopes) is ingested
-and grouped correctly.
+## Note
 
-## Remaining: on-device test (manual, needs a device build)
-
-Building `fysiodk-aalborg-sport` on a real iOS/Android device + triggering a JS
-error and a native crash to confirm both land in Upmetrics issues is a
-device-dependent step (Xcode/simulator + the app's build). It is **not** run by
-this card — it requires a device build and is Christian's to execute when the app
-is next built. The protocol compatibility above guarantees the events will be
-accepted once the SDK is wired and a crash fires.
-
-## Phase 2 (deferred)
-
-- iOS dSYM upload + symbolication (native crashes show raw addresses until then)
-- Android ProGuard mapping upload
-- App-runtime RUM/heartbeats
-
-Probing the app's **backend** API is already covered by F004 (cronjobs probes
-from an external host) — not the app client.
+The Upmetrics ingest is Sentry-envelope-compatible (F002.1), so it *can* accept
+events from any Sentry SDK — but per the decision above we do not use one. The
+compatibility remains useful for migrating existing Sentry-instrumented projects
+("point the DSN here"), not for shipping Sentry into our own apps.
