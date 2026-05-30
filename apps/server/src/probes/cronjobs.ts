@@ -24,7 +24,12 @@ export function intervalToCron(seconds: number): string {
   return minutes === 1 ? '* * * * *' : `*/${minutes} * * * *`;
 }
 
-export async function createProbeJob(name: string, intervalSeconds: number, runUrl: string): Promise<string> {
+export async function createProbeJob(
+  name: string,
+  intervalSeconds: number,
+  runUrl: string,
+  runToken: string,
+): Promise<string> {
   const res = await cj('/api/jobs', {
     method: 'POST',
     body: JSON.stringify({
@@ -34,6 +39,9 @@ export async function createProbeJob(name: string, intervalSeconds: number, runU
       protocol: 'https',
       method: 'GET',
       url: runUrl,
+      // Run-token travels in a header (not the URL) so it never lands in stored
+      // job URLs or request logs. cronjobs forwards stored headers verbatim.
+      headers: JSON.stringify({ 'X-Upmetrics-Run-Key': runToken }),
       timeout: 30000,
       enabled: true,
       tags: ['upmetrics-probe'],

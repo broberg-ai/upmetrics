@@ -15,8 +15,8 @@ function projectFromKey(c: Context) {
   return getDb().select().from(schema.projects).where(eq(schema.projects.apiKey, key)).get() ?? null;
 }
 
-function runUrl(probeId: string, runToken: string): string {
-  return `${config.authBaseUrl}/api/probes/${probeId}/run?key=${runToken}`;
+function runUrl(probeId: string): string {
+  return `${config.authBaseUrl}/api/probes/${probeId}/run`;
 }
 
 export function registerProbeRoutes(app: Hono): void {
@@ -47,7 +47,7 @@ export function registerProbeRoutes(app: Hono): void {
 
     let cronjobsJobId: string | null = null;
     try {
-      cronjobsJobId = await createProbeJob(b.name, Number(b.interval_seconds), runUrl(id, runToken));
+      cronjobsJobId = await createProbeJob(b.name, Number(b.interval_seconds), runUrl(id), runToken);
       db.update(schema.probes).set({ cronjobsJobId }).where(eq(schema.probes.id, id)).run();
     } catch (err) {
       return c.json({ id, cronjobs_synced: false, error: `probe saved but cronjobs sync failed: ${(err as Error).message}` }, 502);
@@ -88,7 +88,7 @@ export function registerProbeRoutes(app: Hono): void {
     const probe = db.select().from(schema.probes).where(eq(schema.probes.id, c.req.param('id'))).get();
     if (!probe) return c.json({ error: 'unknown_probe' }, 404);
     const cfg = (probe.config ?? {}) as Record<string, any>;
-    if (c.req.query('key') !== cfg.runToken) return c.json({ error: 'bad_run_key' }, 401);
+    if (c.req.header('x-upmetrics-run-key') !== cfg.runToken) return c.json({ error: 'bad_run_key' }, 401);
 
     const result = await runCheck(probe);
     const now = new Date();
