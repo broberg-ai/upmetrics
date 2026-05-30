@@ -28,6 +28,10 @@ export const config = {
   agentFailureSpikeThreshold: int('AGENT_FAILURE_SPIKE_THRESHOLD', 5),
   // Alert engine (F005.2). Dedup window per (rule, incident, severity).
   alertDedupWindowMs: int('ALERT_DEDUP_WINDOW_MS', 3_600_000), // 1h
+  // Remediation dispatcher (F005.3).
+  remediationThreshold: process.env.REMEDIATION_THRESHOLD ?? 'medium', // min severity
+  remediationRetries: int('REMEDIATION_RETRIES', 3),
+  remediationBackoffMs: int('REMEDIATION_BACKOFF_MS', 500),
 } as const;
 
 // Fail fast in production with a CLEAR error if a required secret is missing or
