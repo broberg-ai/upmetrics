@@ -81,4 +81,61 @@ export function registerDashboardRoutes(app: Hono): void {
       .all();
     return c.json({ incidents: rows });
   });
+
+  // Project list (id + name) for dashboard filters.
+  app.get('/api/dashboard/projects', async (c) => {
+    if (!(await requireUser(c))) return c.json({ error: 'unauthorized' }, 401);
+    const rows = getDb().select({ id: schema.projects.id, name: schema.projects.name }).from(schema.projects).all();
+    return c.json({ projects: rows });
+  });
+
+  // Issues list (F006.3) — filter by project/status + title search.
+  app.get('/api/dashboard/issues', async (c) => {
+    if (!(await requireUser(c))) return c.json({ error: 'unauthorized' }, 401);
+    const db = getDb();
+    const project = c.req.query('project');
+    const status = c.req.query('status');
+    const q = c.req.query('q');
+    const conds = [];
+    if (project) conds.push(eq(schema.issues.projectId, project));
+    if (status) conds.push(eq(schema.issues.status, status));
+    if (q) conds.push(sql`lower(${schema.issues.title}) like ${'%' + q.toLowerCase() + '%'}`);
+    const base = db.select().from(schema.issues);
+    const rows = (conds.length ? base.where(and(...conds)) : base).orderBy(desc(schema.issues.lastSeen)).limit(200).all();
+    return c.json({ issues: rows });
+  });
+
+  // Issue detail — issue + recent events (stack/breadcrumbs/tags) + related agent runs.
+  app.get('/api/dashboard/issues/:id', async (c) => {
+    if (!(await requireUser(c))) return c.json({ error: 'unauthorized' }, 401);
+    const db = getDb();
+    const issue = db.select().from(schema.issues).where(eq(schema.issues.id, c.req.param('id'))).get();
+    if (!issue) return c.json({ error: 'not_found' }, 404);
+    const events = db.select().from(schema.events).where(eq(schema.events.issueId, issue.id)).orderBy(desc(schema.events.receivedAt)).limit(20).all();
+    const relatedRuns = db
+      .select()
+      .from(schema.agentRuns)
+      .where(eq(schema.agentRuns.errorIssueId, issue.id))
+      .orderBy(desc(schema.agentRuns.startedAt))
+      .limit(20)
+      .all();
+    return c.json({ issue, events, related_agent_runs: relatedRuns });
+  });
+
+  // Issue actions — resolve / ignore / reopen.
+  app.post('/api/dashboard/issues/:id/status', async (c) => {
+    if (!(await requireUser(c))) return c.json({ error: 'unauthorized' }, 401);
+    const b = (await c.req.json().catch(() => ({}))) as { status?: string };
+    const status = String(b.status ?? '');
+    if (!['unresolved', 'resolved', 'ignored'].includes(status)) return c.json({ error: 'bad_status' }, 400);
+    getDb().update(schema.issues).set({ status }).where(eq(schema.issues.id, c.req.param('id'))).run();
+    return c.json({ ok: true });
+  });
+
+  app.post('/api/dashboard/issues/:id/assign', async (c) => {
+    if (!(await requireUser(c))) return c.json({ error: 'unauthorized' }, 401);
+    const b = (await c.req.json().catch(() => ({}))) as { assignee?: string | null };
+    getDb().update(schema.issues).set({ assignee: b.assignee ?? null }).where(eq(schema.issues.id, c.req.param('id'))).run();
+    return c.json({ ok: true });
+  });
 }
