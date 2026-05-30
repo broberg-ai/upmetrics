@@ -154,3 +154,4 @@ vite.config.ts.timestamp-*
 *.db-shm
 *.db-wal
 local.db
+apps/server/web-dist/

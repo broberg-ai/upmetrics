@@ -1,6 +1,7 @@
 // Hono application factory. Routes for ingest/probes/incidents/auth are mounted
 // in later stories (F002+); this is the skeleton with /health + error handling.
 import { Hono } from 'hono';
+import { join } from 'node:path';
 import { auth } from './auth';
 import { registerIngestRoutes } from './ingest/routes';
 import { registerAgentRoutes } from './ingest/agent';
@@ -21,25 +22,25 @@ export function createApp() {
     c.json({ status: 'ok', service: '@upmetrics/server', ts: Date.now() }),
   );
 
-  // Minimal landing — magic-link verify redirects here until the F006 dashboard
-  // exists. Reads ?error= so an expired/invalid link isn't reported as success.
-  app.get('/', (c) => {
-    const error = c.req.query('error');
-    const body = error
-      ? `<h1>Upmetrics</h1><p style="color:#b00">⚠ Sign-in link ${error === 'EXPIRED_TOKEN' ? 'expired' : 'failed'} (${error}).</p><p>Request a new magic link and click it within 15 minutes.</p>`
-      : `<h1>Upmetrics</h1><p>✓ Server is running. If you arrived from a sign-in link, you're authenticated — your session cookie is set.</p>`;
-    return c.html(
-      `<!doctype html><meta charset="utf-8"><title>Upmetrics</title>` +
-        `<body style="font-family:system-ui;max-width:32rem;margin:4rem auto;padding:0 1rem">` +
-        body +
-        `<p style="color:#666">Dashboard UI lands in F006.</p></body>`,
-    );
-  });
-
   // Better Auth handles all /api/auth/* routes (magic-link, session, callback).
   app.on(['GET', 'POST'], '/api/auth/*', (c) => auth.handler(c.req.raw));
 
-  app.notFound((c) => c.json({ error: 'not_found' }, 404));
+  // Serve the dashboard SPA (F006). apps/web builds to web-dist, shipped in the
+  // image; path is resolved from this file so it's cwd-independent.
+  const WEB = join(import.meta.dir, '../web-dist');
+  app.get('/assets/*', async (c) => {
+    const f = Bun.file(join(WEB, c.req.path));
+    return (await f.exists()) ? new Response(f) : c.json({ error: 'not_found' }, 404);
+  });
+
+  // Anything else that's a non-API GET → index.html (SPA client-side routing).
+  app.notFound(async (c) => {
+    if (c.req.method === 'GET' && !c.req.path.startsWith('/api') && c.req.path !== '/health') {
+      const index = Bun.file(join(WEB, 'index.html'));
+      if (await index.exists()) return new Response(index);
+    }
+    return c.json({ error: 'not_found' }, 404);
+  });
 
   app.onError((err, c) => {
     console.error('[server] unhandled error:', err);
