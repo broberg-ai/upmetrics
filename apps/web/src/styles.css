@@ -1,0 +1,46 @@
+@import 'tailwindcss';
+@custom-variant dark (&:where(.dark, .dark *));
+
+/* Semantic tokens — flip in .dark. shadcn-ish neutral + clay/cyan accent. */
+:root {
+  --bg: #ffffff;
+  --surface: #f7f7f6;
+  --surface-2: #efeeec;
+  --border: #e4e4e1;
+  --text: #1a1a18;
+  --muted: #6b6b64;
+  --primary: #0f7391;
+  --primary-fg: #ffffff;
+  --ok: #16a34a;
+  --warn: #d97706;
+  --down: #dc2626;
+}
+.dark {
+  --bg: #0d0e10;
+  --surface: #161819;
+  --surface-2: #1d2023;
+  --border: #2a2e33;
+  --text: #e9e9e6;
+  --muted: #9aa0a6;
+  --primary: #38bdf8;
+  --primary-fg: #06121a;
+  --ok: #34d399;
+  --warn: #fbbf24;
+  --down: #f87171;
+}
+
+html,
+body,
+#app {
+  height: 100%;
+}
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--text);
+  font-family: ui-sans-serif, system-ui, -apple-system, 'Segoe UI', sans-serif;
+  -webkit-font-smoothing: antialiased;
+}
+* {
+  border-color: var(--border);
+}
