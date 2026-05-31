@@ -174,6 +174,10 @@ export const incidents = sqliteTable(
     // incident to a live cc session; claimed incidents drop out of /pending.
     relayClaimedAt: integer('relay_claimed_at', { mode: 'timestamp_ms' }),
     relaySession: text('relay_session'),
+    // F010.4 — manual push-to-remediation. Set when a user explicitly pushes an
+    // issue/incident to Buddy from the dashboard; bypasses the auto severity +
+    // opt-in gates so a single issue can be relayed on demand.
+    relayRequestedAt: integer('relay_requested_at', { mode: 'timestamp_ms' }),
   },
   (t) => [index('incidents_project_idx').on(t.projectId)],
 );

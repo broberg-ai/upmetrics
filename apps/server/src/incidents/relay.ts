@@ -11,7 +11,8 @@ import { config } from '../config';
 type Db = ReturnType<typeof getDb>;
 const SEVERITY_RANK: Record<string, number> = { low: 1, medium: 2, high: 3, critical: 4 };
 // Only code-fixable error incidents — NOT probe_down (infra, not a session's bug).
-const ERROR_KINDS = new Set(['error_spike', 'agent_failure_spike']);
+// 'manual_remediation' = a user pushed an issue here on demand (F010.4).
+const ERROR_KINDS = new Set(['error_spike', 'agent_failure_spike', 'manual_remediation']);
 
 // repo basename → absolute path (local to Christian's Mac). Buddy resolves
 // repo→path via its own repos table; repo_path is a best-effort hint.
@@ -30,6 +31,7 @@ export interface RemediationItem {
   repo: string;
   repo_path: string | null;
   severity: string;
+  manual: boolean;
   opened_at: Date;
   issue: {
     id: string;
@@ -56,9 +58,14 @@ export function pendingRemediations(db: Db): RemediationItem[] {
   const minRank = SEVERITY_RANK[config.remediationRelaySeverity] ?? 3;
   for (const inc of open) {
     if (!ERROR_KINDS.has(inc.kind)) continue;
-    if ((SEVERITY_RANK[inc.severity] ?? 0) < minRank) continue;
+    // A manual push (relayRequestedAt set) is explicit user intent — it bypasses
+    // the auto severity threshold and per-project opt-in gates.
+    const manual = Boolean(inc.relayRequestedAt);
+    if (!manual && (SEVERITY_RANK[inc.severity] ?? 0) < minRank) continue;
     const project = db.select().from(schema.projects).where(eq(schema.projects.id, inc.projectId)).get();
-    if (!project?.remediationRelay || !project.repo) continue;
+    if (!project) continue;
+    if (!manual && (!project.remediationRelay || !project.repo)) continue;
+    const repo = project.repo ?? project.id;
     // Resolve the representative issue. Some incidents carry an issue id in
     // trigger_ref; correlation-opened spikes use "kind:project" (NOT an issue id)
     // — for those, surface the project's most-recent unresolved issue so the
@@ -90,9 +97,10 @@ export function pendingRemediations(db: Db): RemediationItem[] {
     out.push({
       incident_id: inc.id,
       project: project.id,
-      repo: project.repo,
-      repo_path: REPO_PATHS[project.repo] ?? null,
+      repo,
+      repo_path: REPO_PATHS[repo] ?? null,
       severity: inc.severity,
+      manual,
       opened_at: inc.openedAt,
       issue: {
         id: issue.id,

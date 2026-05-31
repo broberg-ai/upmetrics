@@ -92,11 +92,19 @@ export function registerIngestRoutes(app: Hono): void {
       const p = (item.payload ?? {}) as Record<string, unknown>;
       const occurred = occurredAt(item);
       const id = eventId(item, env.headers);
+      // A Sentry envelope item of type 'event' covers BOTH exceptions
+      // (captureException) and plain messages (captureMessage). Only the
+      // presence of an exception payload separates them — without this an
+      // info-level startup marker would be stored as kind='error', counted by
+      // error-spike correlation, and could trigger a remediation loop on a
+      // healthy service. Errors group into issues; messages do not.
+      const hasException = Boolean((p['exception'] as { values?: unknown[] } | undefined)?.values?.length);
+      const kind = item.type === 'event' ? (hasException ? 'error' : 'message') : item.type;
       db.insert(schema.events)
         .values({
           id,
           projectId: project.id,
-          kind: item.type === 'event' ? 'error' : item.type,
+          kind,
           receivedAt: now,
           occurredAt: occurred,
           payload: p,
@@ -107,7 +115,7 @@ export function registerIngestRoutes(app: Hono): void {
         })
         .onConflictDoNothing()
         .run();
-      if (item.type === 'event') toGroup.push({ id, payload: p, occurred });
+      if (kind === 'error') toGroup.push({ id, payload: p, occurred });
       accepted++;
     }
 

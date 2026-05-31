@@ -2,11 +2,12 @@
 // Business logic stays server-side; the SPA only renders. All routes require a
 // valid Better Auth session (the dashboard cookie).
 import type { Context, Hono } from 'hono';
-import { and, desc, eq, gte, lte, sql } from 'drizzle-orm';
+import { and, desc, eq, gte, isNotNull, lte, or, sql } from 'drizzle-orm';
 import { getDb, schema } from '../db';
 import { auth } from '../auth';
 import { deleteProbeJob, setProbeJobEnabled } from '../probes/cronjobs';
 import { dispatchRemediation } from '../incidents/remediation';
+import { pendingRemediations } from '../incidents/relay';
 
 async function requireUser(c: Context): Promise<boolean> {
   const session = await auth.api.getSession({ headers: c.req.raw.headers });
@@ -70,6 +71,95 @@ export function registerDashboardRoutes(app: Hono): void {
         agent_cost_today: rows.reduce((a, r) => a + r.agent_cost_today, 0),
       },
     });
+  });
+
+  // Project detail page (standalone per-repo view). Summary + the distinct
+  // surfaces (release tags) that have reported, e.g. Trail → trail-admin /
+  // trail-engine / trail-admin-server. One repo is one project; each component
+  // identifies itself via the SDK `release` it sets at init().
+  app.get('/api/dashboard/projects/:id', async (c) => {
+    if (!(await requireUser(c))) return c.json({ error: 'unauthorized' }, 401);
+    const db = getDb();
+    const pid = c.req.param('id');
+    const project = db.select().from(schema.projects).where(eq(schema.projects.id, pid)).get();
+    if (!project) return c.json({ error: 'not_found' }, 404);
+    const today = startOfToday();
+
+    const rows = db
+      .select({
+        release: schema.events.release,
+        environment: schema.events.environment,
+        total: sql<number>`count(*)`,
+        errors: sql<number>`sum(case when ${schema.events.kind} = 'error' then 1 else 0 end)`,
+        last_seen: sql<number>`max(${schema.events.receivedAt})`,
+      })
+      .from(schema.events)
+      .where(eq(schema.events.projectId, pid))
+      .groupBy(schema.events.release, schema.events.environment)
+      .all();
+
+    const components = rows
+      .map((r) => ({
+        release: r.release ?? '(untagged)',
+        environment: r.environment ?? null,
+        total: Number(r.total),
+        errors: Number(r.errors),
+        last_seen: r.last_seen ? Number(r.last_seen) : null,
+      }))
+      .sort((a, b) => (b.last_seen ?? 0) - (a.last_seen ?? 0));
+
+    const costAgg = (where: any) =>
+      Number(db.select({ s: sql<number>`coalesce(sum(cost_usd),0)` }).from(schema.agentRuns).where(where).get()?.s ?? 0);
+
+    return c.json({
+      project: { id: project.id, name: project.name, platform: project.platform },
+      open_issues: countWhere(schema.issues, and(eq(schema.issues.projectId, pid), eq(schema.issues.status, 'unresolved'))),
+      open_incidents: countWhere(schema.incidents, and(eq(schema.incidents.projectId, pid), eq(schema.incidents.status, 'open'))),
+      total_events: components.reduce((a, x) => a + x.total, 0),
+      cost_today: costAgg(and(eq(schema.agentRuns.projectId, pid), gte(schema.agentRuns.startedAt, today))),
+      cost_total: costAgg(eq(schema.agentRuns.projectId, pid)),
+      components,
+    });
+  });
+
+  // The actual errors behind a component's count — so "22 err" is drillable.
+  // Joins events (for that release) to their issue for a human title. Untagged
+  // components pass release=__none__.
+  app.get('/api/dashboard/projects/:id/component-errors', async (c) => {
+    if (!(await requireUser(c))) return c.json({ error: 'unauthorized' }, 401);
+    const db = getDb();
+    const pid = c.req.param('id');
+    const release = c.req.query('release');
+    const relCond = release && release !== '__none__' ? eq(schema.events.release, release) : sql`${schema.events.release} is null`;
+    const rows = db
+      .select({
+        event_id: schema.events.id,
+        issue_id: schema.events.issueId,
+        occurred_at: schema.events.occurredAt,
+        payload: schema.events.payload,
+        issue_title: schema.issues.title,
+        issue_status: schema.issues.status,
+      })
+      .from(schema.events)
+      .leftJoin(schema.issues, eq(schema.events.issueId, schema.issues.id))
+      .where(and(eq(schema.events.projectId, pid), eq(schema.events.kind, 'error'), relCond))
+      .orderBy(desc(schema.events.receivedAt))
+      .limit(50)
+      .all();
+
+    const errors = rows.map((r) => {
+      const ex = (r.payload as any)?.exception?.values?.[0] ?? {};
+      return {
+        event_id: r.event_id,
+        issue_id: r.issue_id,
+        title: r.issue_title ?? ex.type ?? 'Error',
+        type: ex.type ?? null,
+        value: ex.value ?? null,
+        status: r.issue_status ?? null,
+        occurred_at: r.occurred_at,
+      };
+    });
+    return c.json({ errors });
   });
 
   // Open incidents for the global bar (F006.5 consumes; cheap + handy now).
@@ -139,6 +229,74 @@ export function registerDashboardRoutes(app: Hono): void {
     const b = (await c.req.json().catch(() => ({}))) as { assignee?: string | null };
     getDb().update(schema.issues).set({ assignee: b.assignee ?? null }).where(eq(schema.issues.id, c.req.param('id'))).run();
     return c.json({ ok: true });
+  });
+
+  // F010.4 — manually push an issue to the remediation feed (→ Buddy → cc
+  // session). For issues that never hit the auto error-spike threshold but a
+  // human wants fixed now. Creates (or re-arms) an open manual_remediation
+  // incident keyed to the issue; it enters /api/remediation/pending bypassing
+  // the severity + opt-in gates. Idempotent per open issue.
+  app.post('/api/dashboard/issues/:id/push-remediation', async (c) => {
+    if (!(await requireUser(c))) return c.json({ error: 'unauthorized' }, 401);
+    const db = getDb();
+    const issue = db.select().from(schema.issues).where(eq(schema.issues.id, c.req.param('id'))).get();
+    if (!issue) return c.json({ error: 'not_found' }, 404);
+    const now = new Date();
+    const existing = db
+      .select()
+      .from(schema.incidents)
+      .where(and(eq(schema.incidents.triggerRef, issue.id), eq(schema.incidents.kind, 'manual_remediation'), eq(schema.incidents.status, 'open')))
+      .get();
+    if (existing) {
+      if (existing.relayClaimedAt) return c.json({ ok: true, already_claimed: true, incident_id: existing.id });
+      db.update(schema.incidents).set({ relayRequestedAt: now }).where(eq(schema.incidents.id, existing.id)).run();
+      return c.json({ ok: true, incident_id: existing.id });
+    }
+    const id = crypto.randomUUID();
+    db.insert(schema.incidents)
+      .values({
+        id,
+        projectId: issue.projectId,
+        kind: 'manual_remediation',
+        status: 'open',
+        severity: issue.level === 'fatal' ? 'critical' : 'high',
+        title: `Manual remediation: ${issue.title}`,
+        openedAt: now,
+        triggerRef: issue.id,
+        relayRequestedAt: now,
+      })
+      .run();
+    return c.json({ ok: true, incident_id: id });
+  });
+
+  // F010.4 — remediation view: what's awaiting a cc session (pending) and what
+  // has been pushed/claimed (history), so the loop is visible, not just auto.
+  app.get('/api/dashboard/remediation', async (c) => {
+    if (!(await requireUser(c))) return c.json({ error: 'unauthorized' }, 401);
+    const db = getDb();
+    const names = new Map(db.select({ id: schema.projects.id, name: schema.projects.name }).from(schema.projects).all().map((p) => [p.id, p.name]));
+    const rows = db
+      .select()
+      .from(schema.incidents)
+      .where(or(isNotNull(schema.incidents.relayClaimedAt), isNotNull(schema.incidents.relayRequestedAt)))
+      .orderBy(desc(schema.incidents.openedAt))
+      .limit(100)
+      .all();
+    const history = rows.map((i) => ({
+      incident_id: i.id,
+      project: i.projectId,
+      project_name: names.get(i.projectId) ?? i.projectId,
+      title: i.title,
+      kind: i.kind,
+      severity: i.severity,
+      status: i.status,
+      manual: Boolean(i.relayRequestedAt),
+      relay_session: i.relaySession,
+      requested_at: i.relayRequestedAt,
+      claimed_at: i.relayClaimedAt,
+      opened_at: i.openedAt,
+    }));
+    return c.json({ pending: pendingRemediations(db), history });
   });
 
   // ── Agents (F006.4) — the §8 differentiator ──────────────────────────────

@@ -1,4 +1,6 @@
 import { useState } from 'preact/hooks';
+import { useLocation } from 'preact-iso';
+import { Send } from 'lucide-preact';
 import { useApi } from '../lib/useApi';
 import { api } from '../lib/api';
 import { fmtDate, fmtRel } from '../lib/format';
@@ -47,8 +49,10 @@ const LEVEL_TONE: Record<string, 'down' | 'warn' | 'muted'> = { error: 'down', w
 const STATUS_TONE: Record<string, 'warn' | 'ok' | 'muted'> = { unresolved: 'warn', resolved: 'ok', ignored: 'muted' };
 
 export function Issues() {
+  const { query } = useLocation();
   const projects = useApi<{ projects: { id: string; name: string }[] }>('/dashboard/projects');
-  const [project, setProject] = useState<string | null>(null);
+  const [project, setProject] = useState<string | null>(query?.project ?? null);
+  const projName = new Map((projects.data?.projects ?? []).map((p) => [p.id, p.name]));
   const [status, setStatus] = useState<string | null>('unresolved');
   const [q, setQ] = useState('');
   const [sel, setSel] = useState<string | null>(null);
@@ -94,6 +98,7 @@ export function Issues() {
             <thead class="text-left text-xs text-[var(--muted)]">
               <tr>
                 <th class="px-4 py-2 font-medium">Issue</th>
+                <th class="px-4 py-2 font-medium">Project</th>
                 <th class="px-4 py-2 font-medium">Level</th>
                 <th class="px-4 py-2 font-medium">Status</th>
                 <th class="px-4 py-2 font-medium">Events</th>
@@ -111,6 +116,9 @@ export function Issues() {
                   <td class="px-4 py-2">
                     <div class="font-medium">{i.title}</div>
                     {i.culprit && <div class="text-xs text-[var(--muted)]">{i.culprit}</div>}
+                  </td>
+                  <td class="px-4 py-2">
+                    <Badge tone="muted">{projName.get(i.projectId) ?? i.projectId}</Badge>
                   </td>
                   <td class="px-4 py-2">
                     <Badge tone={LEVEL_TONE[i.level] ?? 'muted'}>{i.level}</Badge>
@@ -160,6 +168,17 @@ function IssueDetail({ id, onClose, onChanged }: { id: string; onClose: () => vo
       onChanged();
     } catch {
       toast('Assign failed', 'error');
+    } finally {
+      setBusy(false);
+    }
+  };
+  const pushRemediation = async () => {
+    setBusy(true);
+    try {
+      const r = await api<{ already_claimed?: boolean }>(`/dashboard/issues/${id}/push-remediation`, { method: 'POST' });
+      toast(r.already_claimed ? 'Already claimed by a session' : 'Pushed to remediation → Buddy relays it', 'success');
+    } catch {
+      toast('Push failed', 'error');
     } finally {
       setBusy(false);
     }
@@ -234,7 +253,7 @@ function IssueDetail({ id, onClose, onChanged }: { id: string; onClose: () => vo
             </div>
           )}
 
-          <div class="flex gap-2 border-t pt-3" style={{ borderColor: 'var(--border)' }}>
+          <div class="flex flex-wrap items-center gap-2 border-t pt-3" style={{ borderColor: 'var(--border)' }}>
             <Button variant="primary" loading={busy} onClick={() => setStatus('resolved')}>
               Resolve
             </Button>
@@ -243,6 +262,9 @@ function IssueDetail({ id, onClose, onChanged }: { id: string; onClose: () => vo
             </Button>
             <Button variant="ghost" loading={busy} onClick={() => setStatus('unresolved')}>
               Reopen
+            </Button>
+            <Button variant="outline" loading={busy} onClick={pushRemediation} class="ml-auto" title="Send this issue to Buddy → a cc session fixes it">
+              <Send size={14} /> Push to remediation
             </Button>
           </div>
 

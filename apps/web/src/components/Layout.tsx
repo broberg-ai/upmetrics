@@ -1,7 +1,7 @@
 import type { ComponentChildren } from 'preact';
 import { useState } from 'preact/hooks';
 import { useLocation } from 'preact-iso';
-import { LayoutDashboard, Bug, Bot, Activity, AlertTriangle, Moon, Sun, LogOut } from 'lucide-preact';
+import { LayoutDashboard, Bug, Bot, Activity, AlertTriangle, Wrench, Moon, Sun, LogOut } from 'lucide-preact';
 import { cn } from '../lib/cn';
 import { signOut, type SessionUser } from '../lib/auth';
 import logoUrl from '../assets/logo.svg';
@@ -13,6 +13,7 @@ const NAV = [
   { href: '/agents', label: 'Agents', icon: Bot },
   { href: '/probes', label: 'Probes', icon: Activity },
   { href: '/incidents', label: 'Incidents', icon: AlertTriangle },
+  { href: '/remediation', label: 'Remediation', icon: Wrench },
 ];
 
 export function Layout({ user, children }: { user: SessionUser; children: ComponentChildren }) {

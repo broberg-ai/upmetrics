@@ -110,6 +110,22 @@ describe('F010 remediation relay (pull feed)', () => {
     expect(pending[0]!.issue.title).toContain('real spike');
   });
 
+  it('manual push (relay_requested_at) bypasses opt-in + severity gates', () => {
+    const db = freshDb();
+    // project NOT opted in, no repo, and the incident is only medium severity —
+    // all gates that would normally exclude it.
+    addProject(db, 'cardmem', { remediationRelay: false });
+    addIssue(db, 'iss_m', 'cardmem', { title: 'Error: pushed by hand' });
+    addEvent(db, 'iss_m', 'cardmem', 'cardmem-server', [{ f: 1 }]);
+    addIncident(db, 'cardmem', { kind: 'manual_remediation', severity: 'medium', triggerRef: 'iss_m', relayRequestedAt: NOW });
+
+    const pending = pendingRemediations(db);
+    expect(pending.length).toBe(1);
+    expect(pending[0]!.manual).toBe(true);
+    expect(pending[0]!.repo).toBe('cardmem'); // falls back to project id when repo unset
+    expect(pending[0]!.issue.title).toContain('pushed by hand');
+  });
+
   it('excludes: opt-in off, below severity, probe_down, and projects with no repo', () => {
     const db = freshDb();
     addProject(db, 'optout', { remediationRelay: false, repo: 'optout' });

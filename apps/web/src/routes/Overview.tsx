@@ -20,7 +20,6 @@ interface OverviewData {
 
 const TONE = { ok: 'ok', degraded: 'warn', down: 'down' } as const;
 const STATUS_LABEL = { ok: 'Healthy', degraded: 'Degraded', down: 'Down' } as const;
-const usd = (n: number) => `$${n.toFixed(2)}`;
 
 function Metric({ label, value, tone }: { label: string; value: string | number; tone?: 'ok' | 'warn' | 'down' }) {
   return (
@@ -48,7 +47,7 @@ export function Overview() {
       ) : (
         <div class="space-y-6">
           {/* totals strip */}
-          <div class="grid grid-cols-2 gap-3 sm:grid-cols-4">
+          <div class="grid grid-cols-3 gap-3">
             <Card>
               <Metric label="Projects" value={data.totals.projects} />
             </Card>
@@ -58,29 +57,31 @@ export function Overview() {
             <Card>
               <Metric label="Open incidents" value={data.totals.open_incidents} tone={data.totals.open_incidents ? 'down' : undefined} />
             </Card>
-            <Card>
-              <Metric label="Agent cost today" value={usd(data.totals.agent_cost_today)} />
-            </Card>
           </div>
 
-          {/* per-project health cards */}
+          {/* per-project health cards — click through to the project page */}
           <div class="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
             {data.projects.map((p) => (
-              <Card key={p.id}>
-                <div class="mb-3 flex items-center justify-between">
-                  <div class="flex items-center gap-2">
-                    <StatusDot tone={TONE[p.status]} />
-                    <span class="font-medium">{p.name}</span>
+              <a
+                key={p.id}
+                href={`/projects/${p.id}`}
+                class="block rounded-xl transition hover:brightness-110 active:scale-[0.99] focus:outline-none focus-visible:ring-2 focus-visible:ring-[var(--primary)]"
+              >
+                <Card>
+                  <div class="mb-3 flex items-center justify-between">
+                    <div class="flex items-center gap-2">
+                      <StatusDot tone={TONE[p.status]} />
+                      <span class="font-medium">{p.name}</span>
+                    </div>
+                    <Badge tone="muted">{p.platform}</Badge>
                   </div>
-                  <Badge tone="muted">{p.platform}</Badge>
-                </div>
-                <div class="grid grid-cols-2 gap-3">
-                  <Metric label={`Probes up (${p.probe_total})`} value={p.probe_up_pct === null ? '—' : `${p.probe_up_pct}%`} tone={p.probe_up_pct !== null && p.probe_up_pct < 100 ? 'down' : undefined} />
-                  <Metric label="Open issues" value={p.open_issues} tone={p.open_issues ? 'warn' : undefined} />
-                  <Metric label="Incidents" value={p.open_incidents} tone={p.open_incidents ? 'down' : undefined} />
-                  <Metric label="Cost today" value={usd(p.agent_cost_today)} />
-                </div>
-              </Card>
+                  <div class="grid grid-cols-3 gap-3">
+                    <Metric label={`Probes up (${p.probe_total})`} value={p.probe_up_pct === null ? '—' : `${p.probe_up_pct}%`} tone={p.probe_up_pct !== null && p.probe_up_pct < 100 ? 'down' : undefined} />
+                    <Metric label="Open issues" value={p.open_issues} tone={p.open_issues ? 'warn' : undefined} />
+                    <Metric label="Incidents" value={p.open_incidents} tone={p.open_incidents ? 'down' : undefined} />
+                  </div>
+                </Card>
+              </a>
             ))}
           </div>
 
@@ -95,20 +96,20 @@ export function Overview() {
                   <th class="pb-2 font-medium">Probes</th>
                   <th class="pb-2 font-medium">Issues</th>
                   <th class="pb-2 font-medium">Incidents</th>
-                  <th class="pb-2 font-medium">Cost today</th>
                 </tr>
               </thead>
               <tbody>
                 {data.projects.map((p) => (
                   <tr key={p.id} class="border-t" style={{ borderColor: 'var(--border)' }}>
-                    <td class="py-2">{p.name}</td>
+                    <td class="py-2">
+                      <a href={`/projects/${p.id}`} class="hover:underline">{p.name}</a>
+                    </td>
                     <td class="py-2">
                       <Badge tone={TONE[p.status]}>{STATUS_LABEL[p.status]}</Badge>
                     </td>
                     <td class="py-2">{p.probe_up_pct === null ? '—' : `${p.probe_up_pct}%`}</td>
                     <td class="py-2">{p.open_issues}</td>
                     <td class="py-2">{p.open_incidents}</td>
-                    <td class="py-2">{usd(p.agent_cost_today)}</td>
                   </tr>
                 ))}
               </tbody>

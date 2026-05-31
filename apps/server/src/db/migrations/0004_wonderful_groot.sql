@@ -1,0 +1,1 @@
+ALTER TABLE `incidents` ADD `relay_requested_at` integer;
