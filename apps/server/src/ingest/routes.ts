@@ -2,6 +2,7 @@
 // persists event/transaction/check_in items; drops attachment/session.
 // Grouping (issue_id) is F002.2 — events land with issueId null here.
 import type { Context, Hono } from 'hono';
+import { cors } from 'hono/cors';
 import { eq } from 'drizzle-orm';
 import { getDb, schema } from '../db';
 import { parseEnvelope, extractPublicKey, type EnvelopeItem } from './envelope';
@@ -39,6 +40,19 @@ function occurredAt(item: EnvelopeItem): Date {
 }
 
 export function registerIngestRoutes(app: Hono): void {
+  // Browser SDK clients POST cross-origin (e.g. sport.fdaalborg.dk → here), so
+  // the envelope endpoint must answer the CORS preflight. The DSN public key is
+  // the gate — any origin may send (mirrors Sentry's ingest). No credentials.
+  app.use(
+    '/api/:projectId/envelope/',
+    cors({
+      origin: '*',
+      allowMethods: ['POST', 'OPTIONS'],
+      allowHeaders: ['Content-Type', 'X-Sentry-Auth'],
+      maxAge: 86400,
+    }),
+  );
+
   app.post('/api/:projectId/envelope/', async (c) => {
     const projectId = c.req.param('projectId');
     const db = getDb();
