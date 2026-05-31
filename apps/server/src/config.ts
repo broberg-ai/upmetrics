@@ -44,6 +44,11 @@ export const config = {
   fleetAlertDiscordWebhook: process.env.FLEET_ALERT_DISCORD_WEBHOOK ?? '', // roll-up + digest target
   alertRateCapacity: int('ALERT_RATE_CAPACITY', 10), // global token bucket per window
   alertDigestIntervalMs: int('ALERT_DIGEST_INTERVAL_MS', 600_000), // 10 min min between digests
+  // Ops hardening (F007).
+  retentionIntervalMs: int('RETENTION_INTERVAL_MS', 86_400_000), // daily compaction
+  retentionBatchSize: int('RETENTION_BATCH_SIZE', 1000), // batched deletes (no long lock)
+  probeCompactionDays: int('PROBE_COMPACTION_DAYS', 7), // downsample probe_results to hourly after
+  ingestWarnIntervalMs: int('INGEST_WARN_INTERVAL_MS', 60_000), // dedup the over-limit warning event
 } as const;
 
 // Fail fast in production with a CLEAR error if a required secret is missing or

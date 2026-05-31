@@ -7,6 +7,7 @@ import { eq } from 'drizzle-orm';
 import { getDb, schema } from '../db';
 import { parseEnvelope, extractPublicKey, type EnvelopeItem } from './envelope';
 import { groupEvent } from './grouping';
+import { guardIngest } from '../ops/guard';
 
 // Item types we persist vs. drop (PLAN §7).
 const STORED = new Set(['event', 'transaction', 'check_in']);
@@ -67,6 +68,13 @@ export function registerIngestRoutes(app: Hono): void {
 
     const raw = await c.req.text();
     const env = parseEnvelope(raw);
+
+    // F007.2 — per-project rate limit + storage cap. Over-limit drops the batch
+    // (one warning event emitted) and returns 429; never blocks/crashes ingest.
+    const guard = guardIngest(db, project, env.items.length, Date.now());
+    if (!guard.accept) {
+      return c.json({ accepted: 0, dropped: env.items.length, reason: guard.reason }, 429);
+    }
 
     let accepted = 0;
     let dropped = 0;

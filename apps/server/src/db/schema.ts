@@ -15,6 +15,11 @@ export const projects = sqliteTable('projects', {
   alertEmail: text('alert_email'),
   alertDiscordWebhook: text('alert_discord_webhook'),
   retentionDays: integer('retention_days').notNull().default(30),
+  // F007.1 — agent_runs kept longer than events (analytics value).
+  agentRetentionDays: integer('agent_retention_days').notNull().default(90),
+  // F007.2 — per-project ingest guardrails (read live, no redeploy needed).
+  rateLimitPerMin: integer('rate_limit_per_min').notNull().default(1200),
+  storageMaxEvents: integer('storage_max_events').notNull().default(500000),
   createdAt: integer('created_at', { mode: 'timestamp_ms' }).notNull(),
   updatedAt: integer('updated_at', { mode: 'timestamp_ms' }).notNull(),
 });
@@ -138,6 +143,8 @@ export const probeResults = sqliteTable(
     responseMs: integer('response_ms'),
     statusCode: integer('status_code'),
     error: text('error'),
+    // F007.1 — >1 once this row is an hourly downsample of N raw checks (avg responseMs).
+    sampleCount: integer('sample_count').notNull().default(1),
   },
   (t) => [index('probe_results_probe_idx').on(t.probeId)],
 );

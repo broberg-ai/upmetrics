@@ -15,6 +15,13 @@
       "when": 1780213031126,
       "tag": "0001_powerful_the_hood",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "6",
+      "when": 1780214914506,
+      "tag": "0002_woozy_tinkerer",
+      "breakpoints": true
     }
   ]
 }
