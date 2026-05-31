@@ -16,6 +16,8 @@ RUN bun run build
 # ── Stage 2: server runtime + the built SPA ─────────────────────────────────
 FROM oven/bun:1-slim
 WORKDIR /app
+# ca-certificates so Litestream's S3 client can verify Tigris TLS (F008.1).
+RUN apt-get update && apt-get install -y --no-install-recommends ca-certificates && rm -rf /var/lib/apt/lists/*
 COPY apps/server/package.json ./
 RUN bun install
 COPY apps/server/ ./
