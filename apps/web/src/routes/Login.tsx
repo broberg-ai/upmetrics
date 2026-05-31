@@ -1,6 +1,7 @@
 import { useState } from 'preact/hooks';
 import { requestMagicLink } from '../lib/auth';
 import { Button } from '../components/ui/controls';
+import logoUrl from '../assets/logo.svg';
 
 export function Login() {
   const [email, setEmail] = useState('');
@@ -22,9 +23,9 @@ export function Login() {
   return (
     <div class="grid h-full place-items-center px-4">
       <div class="w-full max-w-sm rounded-xl border p-6" style={{ background: 'var(--surface)', borderColor: 'var(--border)' }}>
-        <div class="mb-1 flex items-center gap-2 text-xl font-bold">
-          <span class="grid h-8 w-8 place-items-center rounded-md" style={{ background: 'var(--primary)', color: 'var(--primary-fg)' }}>
-            U
+        <div class="mb-1 flex items-center gap-2.5 text-xl font-bold">
+          <span class="grid h-9 w-9 place-items-center rounded-lg" style={{ background: '#f7efe8' }}>
+            <img src={logoUrl} alt="Upmetrics" class="h-7 w-7" />
           </span>
           Upmetrics
         </div>

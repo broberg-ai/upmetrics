@@ -4,6 +4,7 @@ import { useLocation } from 'preact-iso';
 import { LayoutDashboard, Bug, Bot, Activity, AlertTriangle, Moon, Sun, LogOut } from 'lucide-preact';
 import { cn } from '../lib/cn';
 import { signOut, type SessionUser } from '../lib/auth';
+import logoUrl from '../assets/logo.svg';
 import { IncidentsBar } from './IncidentsBar';
 
 const NAV = [
@@ -28,8 +29,8 @@ export function Layout({ user, children }: { user: SessionUser; children: Compon
     <div class="flex h-full">
       <aside class="flex w-56 flex-col border-r" style={{ background: 'var(--surface)', borderColor: 'var(--border)' }}>
         <div class="flex items-center gap-2 px-4 py-4 text-lg font-bold">
-          <span class="grid h-7 w-7 place-items-center rounded-md text-sm" style={{ background: 'var(--primary)', color: 'var(--primary-fg)' }}>
-            U
+          <span class="grid h-7 w-7 place-items-center rounded-md" style={{ background: '#f7efe8' }}>
+            <img src={logoUrl} alt="" class="h-[1.15rem] w-[1.15rem]" />
           </span>
           Upmetrics
         </div>
