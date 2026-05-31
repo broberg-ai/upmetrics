@@ -59,8 +59,20 @@ export function pendingRemediations(db: Db): RemediationItem[] {
     if ((SEVERITY_RANK[inc.severity] ?? 0) < minRank) continue;
     const project = db.select().from(schema.projects).where(eq(schema.projects.id, inc.projectId)).get();
     if (!project?.remediationRelay || !project.repo) continue;
-    // error incidents carry the issue id in trigger_ref.
-    const issue = db.select().from(schema.issues).where(eq(schema.issues.id, inc.triggerRef)).get();
+    // Resolve the representative issue. Some incidents carry an issue id in
+    // trigger_ref; correlation-opened spikes use "kind:project" (NOT an issue id)
+    // — for those, surface the project's most-recent unresolved issue so the
+    // relay still carries a concrete title/culprit/stack.
+    let issue = db.select().from(schema.issues).where(eq(schema.issues.id, inc.triggerRef)).get();
+    if (!issue) {
+      issue = db
+        .select()
+        .from(schema.issues)
+        .where(and(eq(schema.issues.projectId, inc.projectId), eq(schema.issues.status, 'unresolved')))
+        .orderBy(desc(schema.issues.lastSeen))
+        .limit(1)
+        .get();
+    }
     if (!issue) continue;
     const ev = db
       .select({ release: schema.events.release, payload: schema.events.payload })

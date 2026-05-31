@@ -96,6 +96,20 @@ describe('F010 remediation relay (pull feed)', () => {
     expect(r.issue.dashboard_url).toContain('/issues/iss_1');
   });
 
+  it('resolves a correlation incident (trigger_ref="kind:project") to the project top issue', () => {
+    const db = freshDb();
+    addProject(db, 'cardmem', { remediationRelay: true, repo: 'cardmem' });
+    addIssue(db, 'iss_top', 'cardmem', { title: 'Error: real spike', eventCount: 12 });
+    addEvent(db, 'iss_top', 'cardmem', 'cardmem-server', [{ f: 'a' }, { f: 'b' }]);
+    // correlation opens error_spike with trigger_ref "error_spike:cardmem" (not an issue id)
+    addIncident(db, 'cardmem', { kind: 'error_spike', severity: 'high', triggerRef: 'error_spike:cardmem' });
+
+    const pending = pendingRemediations(db);
+    expect(pending.length).toBe(1);
+    expect(pending[0]!.issue.id).toBe('iss_top');
+    expect(pending[0]!.issue.title).toContain('real spike');
+  });
+
   it('excludes: opt-in off, below severity, probe_down, and projects with no repo', () => {
     const db = freshDb();
     addProject(db, 'optout', { remediationRelay: false, repo: 'optout' });
