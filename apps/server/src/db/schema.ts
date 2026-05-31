@@ -20,6 +20,10 @@ export const projects = sqliteTable('projects', {
   // F007.2 — per-project ingest guardrails (read live, no redeploy needed).
   rateLimitPerMin: integer('rate_limit_per_min').notNull().default(1200),
   storageMaxEvents: integer('storage_max_events').notNull().default(500000),
+  // F010 — auto-remediation relay. repo = the repo basename Buddy maps to a cc
+  // session; remediation_relay opts the project into the pull-feed.
+  repo: text('repo'), // e.g. "cardmem", "fysiodk-aalborg-sport"
+  remediationRelay: integer('remediation_relay', { mode: 'boolean' }).notNull().default(false),
   createdAt: integer('created_at', { mode: 'timestamp_ms' }).notNull(),
   updatedAt: integer('updated_at', { mode: 'timestamp_ms' }).notNull(),
 });
@@ -166,6 +170,10 @@ export const incidents = sqliteTable(
     triggerRef: text('trigger_ref').notNull(), // probe_id, issue_id, or agent metric ref
     remediationAttempts: text('remediation_attempts', { mode: 'json' }), // [{at, webhook_url, response_status, response_body}]
     eventsAtOpen: text('events_at_open', { mode: 'json' }),
+    // F010 — auto-remediation relay (pull-feed claim). Set when Buddy relays the
+    // incident to a live cc session; claimed incidents drop out of /pending.
+    relayClaimedAt: integer('relay_claimed_at', { mode: 'timestamp_ms' }),
+    relaySession: text('relay_session'),
   },
   (t) => [index('incidents_project_idx').on(t.projectId)],
 );

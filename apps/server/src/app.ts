@@ -8,6 +8,7 @@ import { registerAgentRoutes } from './ingest/agent';
 import { registerProbeRoutes } from './probes/routes';
 import { registerIncidentRoutes } from './incidents/routes';
 import { registerDashboardRoutes } from './dashboard/routes';
+import { registerRemediationRoutes } from './incidents/relay';
 import { captureSelf } from './dogfood';
 
 export function createApp() {
@@ -18,6 +19,7 @@ export function createApp() {
   registerProbeRoutes(app);
   registerIncidentRoutes(app);
   registerDashboardRoutes(app);
+  registerRemediationRoutes(app); // F010 — auto-remediation pull-feed
 
   app.get('/health', (c) =>
     c.json({ status: 'ok', service: '@upmetrics/server', ts: Date.now() }),

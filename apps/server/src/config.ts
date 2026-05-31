@@ -49,6 +49,12 @@ export const config = {
   retentionBatchSize: int('RETENTION_BATCH_SIZE', 1000), // batched deletes (no long lock)
   probeCompactionDays: int('PROBE_COMPACTION_DAYS', 7), // downsample probe_results to hourly after
   ingestWarnIntervalMs: int('INGEST_WARN_INTERVAL_MS', 60_000), // dedup the over-limit warning event
+  // Auto-remediation relay (F010). Buddy (local) polls /api/remediation/pending
+  // with this bearer token + claims relayed incidents. Pull model — upmetrics
+  // never pushes (Buddy is Tailscale-local, not cloud-reachable).
+  remediationRelayToken: process.env.REMEDIATION_RELAY_TOKEN ?? '',
+  remediationRelaySeverity: process.env.REMEDIATION_RELAY_SEVERITY ?? 'high', // min severity to relay
+  remediationEscalateMs: int('REMEDIATION_ESCALATE_MS', 1_800_000), // unclaimed > this → escalate to Christian
 } as const;
 
 // Fail fast in production with a CLEAR error if a required secret is missing or
