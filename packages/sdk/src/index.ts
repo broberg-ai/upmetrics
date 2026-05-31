@@ -160,6 +160,28 @@ function installAutoInstrument(): void {
       }
     };
   }
+
+  // Node/bun daemons: uncaught errors surface via `process`, not `window`, so the
+  // browser listeners above never fire. Install process-level handlers so a pure
+  // local service (Tailscale-only, no browser, no public ingress) is fully tracked
+  // from just init() — outbound POST to ingest needs only egress, which it has.
+  const proc = g.process;
+  if (proc && typeof proc.on === 'function' && !g.__upmetricsNodeWrapped) {
+    g.__upmetricsNodeWrapped = true;
+    proc.on('unhandledRejection', (reason: any) => {
+      captureException(reason instanceof Error ? reason : new Error(`unhandledRejection: ${String(reason)}`));
+    });
+    // Only own uncaughtException if the host isn't already handling it — never
+    // preempt a daemon's own graceful-shutdown logic.
+    if (proc.listenerCount('uncaughtException') === 0) {
+      proc.on('uncaughtException', (err: any) => {
+        captureException(err instanceof Error ? err : new Error(String(err)));
+        // Preserve crash semantics: let the fire-and-forget POST flush, then exit
+        // so a supervisor restarts the daemon — exactly as an unhandled crash would.
+        setTimeout(() => proc.exit(1), 150);
+      });
+    }
+  }
 }
 
 export { scrub, maskString } from './scrub';
