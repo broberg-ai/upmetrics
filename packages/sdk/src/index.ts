@@ -149,7 +149,10 @@ function installAutoInstrument(): void {
       const own = Boolean(config && url.includes(config.parsed.endpoint));
       try {
         const res = await orig(...args);
-        if (!own && res && res.ok === false) captureMessage(`HTTP ${res.status} on ${url}`, 'warning');
+        // Only flag genuine server failures (5xx). Expected client statuses
+        // (401/403/404) and opaque/no-cors responses (status 0) are normal app
+        // traffic, not errors — capturing them floods the project with noise.
+        if (!own && res && res.status >= 500) captureMessage(`HTTP ${res.status} on ${url}`, 'warning');
         return res;
       } catch (err) {
         if (!own) captureException(err);
