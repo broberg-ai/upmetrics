@@ -34,9 +34,15 @@ export function createApp() {
     return (await f.exists()) ? new Response(f) : c.json({ error: 'not_found' }, 404);
   });
 
-  // Anything else that's a non-API GET → index.html (SPA client-side routing).
+  // Anything else that's a non-API GET → serve a real web-dist file if one
+  // exists (favicon.svg, etc.), else index.html (SPA client-side routing).
   app.notFound(async (c) => {
     if (c.req.method === 'GET' && !c.req.path.startsWith('/api') && c.req.path !== '/health') {
+      const rel = c.req.path.replace(/^\/+/, '');
+      if (rel && !rel.includes('..')) {
+        const f = Bun.file(join(WEB, rel));
+        if (await f.exists()) return new Response(f);
+      }
       const index = Bun.file(join(WEB, 'index.html'));
       if (await index.exists()) return new Response(index);
     }
