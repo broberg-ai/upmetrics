@@ -12,7 +12,7 @@
 import { and, eq, gte, inArray, sql } from 'drizzle-orm';
 import { getDb, schema } from '../db';
 import { config } from '../config';
-import { runAlerts } from './alerts';
+import { runAlertsStorm } from './storm';
 import { runRemediation } from './remediation';
 
 type Db = ReturnType<typeof getDb>;
@@ -206,7 +206,7 @@ export function startCorrelationWorker(): void {
     try {
       const db = getDb();
       runCorrelation(db); // F005.1 — derive/correlate incidents (sync)
-      void runAlerts(db).catch((err) => console.error('[alerts] tick failed:', err)); // F005.2 — deliver
+      void runAlertsStorm(db).catch((err) => console.error('[alerts] tick failed:', err)); // F005.2 + F008.3 storm-control
       void runRemediation(db).catch((err) => console.error('[remediation] tick failed:', err)); // F005.3 — dispatch
     } catch (err) {
       console.error('[correlation] tick failed:', err);

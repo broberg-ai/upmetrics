@@ -22,16 +22,39 @@ export interface AlertResult {
   scannedIncidents: number;
   fired: number;
   deduped: number;
+  suppressed: number; // F008.3 — silenced by maintenance/fleet
+  digested: number; // F008.3 — diverted to digest by the global rate-limit
 }
 
-export async function runAlerts(db: Db, now: Date = new Date()): Promise<AlertResult> {
-  const r: AlertResult = { scannedIncidents: 0, fired: 0, deduped: 0 };
+// F008.3 storm-control hooks. Optional + backward-compatible: when omitted,
+// runAlerts behaves exactly as F005.2. storm.ts supplies an implementation.
+export interface AlertControl {
+  // Non-null reason → silence this incident's alerts entirely (maintenance/fleet).
+  suppress(incident: Incident, project: Project): string | null;
+  // Called right before a real delivery; false → over the global rate-limit,
+  // divert to digest instead of sending now.
+  admit(incident: Incident, project: Project): boolean;
+  onDiverted?(incident: Incident, project: Project, reason: 'suppressed' | 'digest', detail?: string): void;
+}
+
+export async function runAlerts(db: Db, now: Date = new Date(), control?: AlertControl): Promise<AlertResult> {
+  const r: AlertResult = { scannedIncidents: 0, fired: 0, deduped: 0, suppressed: 0, digested: 0 };
   const open = db.select().from(schema.incidents).where(eq(schema.incidents.status, 'open')).all();
 
   for (const incident of open) {
     r.scannedIncidents++;
     const project = db.select().from(schema.projects).where(eq(schema.projects.id, incident.projectId)).get();
     if (!project) continue;
+
+    // F008.3 — fleet roll-up / maintenance suppression (whole incident).
+    if (control) {
+      const reason = control.suppress(incident, project);
+      if (reason) {
+        r.suppressed++;
+        control.onDiverted?.(incident, project, 'suppressed', reason);
+        continue;
+      }
+    }
 
     const rules = db
       .select()
@@ -43,6 +66,12 @@ export async function runAlerts(db: Db, now: Date = new Date()): Promise<AlertRe
       if (!ruleMatches(rule, incident)) continue;
       if (isDeduped(db, rule, incident, now)) {
         r.deduped++;
+        continue;
+      }
+      // F008.3 — global rate-limit: divert overflow to the digest.
+      if (control && !control.admit(incident, project)) {
+        r.digested++;
+        control.onDiverted?.(incident, project, 'digest');
         continue;
       }
       const { channelsSent, errors } = await deliver(rule, incident, project);

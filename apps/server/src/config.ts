@@ -34,6 +34,16 @@ export const config = {
   remediationThreshold: process.env.REMEDIATION_THRESHOLD ?? 'medium', // min severity
   remediationRetries: int('REMEDIATION_RETRIES', 3),
   remediationBackoffMs: int('REMEDIATION_BACKOFF_MS', 500),
+  // Fleet-scale alert-storm control (F008.3). Layers on top of F005.2 dedup.
+  stormWindowMs: int('STORM_WINDOW_MS', 300_000), // 5 min correlation window
+  stormProjectThreshold: int('STORM_PROJECT_THRESHOLD', 3), // distinct projects → fleet roll-up
+  stormIncidentThreshold: int('STORM_INCIDENT_THRESHOLD', 5), // total open incidents → fleet roll-up
+  // Incident kinds that are a "region/upmetrics-down" suppressor signal (AC2):
+  // when one is open, downstream per-site alerts are suppressed for the window.
+  fleetOutageKinds: (process.env.FLEET_OUTAGE_KINDS ?? 'region_down,upmetrics_down').split(',').filter(Boolean),
+  fleetAlertDiscordWebhook: process.env.FLEET_ALERT_DISCORD_WEBHOOK ?? '', // roll-up + digest target
+  alertRateCapacity: int('ALERT_RATE_CAPACITY', 10), // global token bucket per window
+  alertDigestIntervalMs: int('ALERT_DIGEST_INTERVAL_MS', 600_000), // 10 min min between digests
 } as const;
 
 // Fail fast in production with a CLEAR error if a required secret is missing or

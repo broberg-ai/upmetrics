@@ -195,3 +195,19 @@ export const alertHistory = sqliteTable(
   },
   (t) => [index('alert_history_rule_idx').on(t.alertRuleId)],
 );
+
+// ── maintenance_windows (F008.3) ─────────────────────────────────────────────
+// A window silences matching alerts. project_id / kind NULL = wildcard (all).
+export const maintenanceWindows = sqliteTable(
+  'maintenance_windows',
+  {
+    id: text('id').primaryKey(),
+    reason: text('reason').notNull(),
+    projectId: text('project_id'), // null = all projects
+    kind: text('kind'), // null = all incident kinds
+    startsAt: integer('starts_at', { mode: 'timestamp_ms' }).notNull(),
+    endsAt: integer('ends_at', { mode: 'timestamp_ms' }).notNull(),
+    createdAt: integer('created_at', { mode: 'timestamp_ms' }).notNull(),
+  },
+  (t) => [index('maintenance_window_idx').on(t.startsAt, t.endsAt)],
+);
