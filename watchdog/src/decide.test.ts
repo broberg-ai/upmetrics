@@ -6,12 +6,14 @@ const T = 1_000_000;
 
 describe('F008.2 watchdog decide()', () => {
   it('AC1+AC2: a full arn outage (both down) fires exactly ONE consolidated alert', () => {
-    const { alert, state } = decide(DEFAULT_STATE, { upmetrics: 'down', cronjobs: 'down' }, T);
+    const { alert, state, changed } = decide(DEFAULT_STATE, { upmetrics: 'down', cronjobs: 'down' }, T);
     expect(alert).toContain('arn region unreachable');
     expect(alert).toContain('upmetrics AND cronjobs');
-    // next tick, still down → no second alert (within re-alert window)
+    expect(changed).toBe(true); // transition → KV write
+    // next tick, still down → no second alert AND no KV write (within re-alert window)
     const next = decide(state, { upmetrics: 'down', cronjobs: 'down' }, T + 60_000);
     expect(next.alert).toBeNull();
+    expect(next.changed).toBe(false); // steady-state → skip the write
   });
 
   it('a single service down fires one alert naming just that service', () => {
@@ -35,8 +37,9 @@ describe('F008.2 watchdog decide()', () => {
     expect(alert).toBe('✅ recovered: upmetrics back up');
   });
 
-  it('steady-state up → silence', () => {
-    const { alert } = decide(DEFAULT_STATE, { upmetrics: 'up', cronjobs: 'up' }, T);
+  it('steady-state up → silence AND no KV write', () => {
+    const { alert, changed } = decide(DEFAULT_STATE, { upmetrics: 'up', cronjobs: 'up' }, T);
     expect(alert).toBeNull();
+    expect(changed).toBe(false); // the common case: zero KV writes
   });
 });

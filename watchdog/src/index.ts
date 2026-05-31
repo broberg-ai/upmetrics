@@ -27,8 +27,10 @@ async function probe(url: string): Promise<Status> {
 async function run(env: Env, now: number): Promise<{ upmetrics: Status; cronjobs: Status; alert: string | null }> {
   const [upmetrics, cronjobs] = await Promise.all([probe(env.UPMETRICS_URL), probe(env.CRONJOBS_URL)]);
   const prev = ((await env.WATCHDOG_KV.get('state', 'json')) as WatchState | null) ?? DEFAULT_STATE;
-  const { alert, state } = decide(prev, { upmetrics, cronjobs }, now);
-  await env.WATCHDOG_KV.put('state', JSON.stringify(state));
+  const { alert, state, changed } = decide(prev, { upmetrics, cronjobs }, now);
+  // Only write on an actual state change — steady-state ticks (the common case)
+  // do zero KV writes, keeping us comfortably inside the free tier.
+  if (changed) await env.WATCHDOG_KV.put('state', JSON.stringify(state));
 
   if (alert && env.DISCORD_WEBHOOK) {
     await fetch(env.DISCORD_WEBHOOK, {

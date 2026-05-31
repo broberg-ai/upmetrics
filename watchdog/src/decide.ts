@@ -24,6 +24,9 @@ export interface CheckResult {
 export interface Decision {
   alert: string | null;
   state: WatchState;
+  // True only when the state actually changed — lets the Worker skip the KV
+  // write on steady-state ticks (free-tier KV writes are the binding limit).
+  changed: boolean;
 }
 
 export const DEFAULT_STATE: WatchState = {
@@ -64,5 +67,12 @@ export function decide(prev: WatchState, check: CheckResult, now: number, realer
     alert = `✅ recovered: ${recovered.join(' + ')} back up`;
   }
 
-  return { alert, state };
+  // step() returns the SAME object ref when status is unchanged, so reference
+  // inequality + the primitive lastAlertAt fully captures "did anything change".
+  const changed =
+    state.upmetrics !== prev.upmetrics ||
+    state.cronjobs !== prev.cronjobs ||
+    state.lastAlertAt !== prev.lastAlertAt;
+
+  return { alert, state, changed };
 }
