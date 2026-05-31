@@ -1,0 +1,16 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "upmetrics-watchdog",
+  "main": "src/index.ts",
+  "compatibility_date": "2026-01-01",
+  // Off-fly heartbeat: every 2 minutes from Cloudflare's edge.
+  "triggers": { "crons": ["*/2 * * * *"] },
+  "observability": { "enabled": true },
+  // Non-secret config. DISCORD_WEBHOOK is a secret → `wrangler secret put`.
+  "vars": {
+    "UPMETRICS_URL": "https://upmetrics.org/health",
+    "CRONJOBS_URL": "https://cronjobs.webhouse.net/"
+  },
+  // Created via `wrangler kv namespace create WATCHDOG_KV` — paste the id here.
+  "kv_namespaces": [{ "binding": "WATCHDOG_KV", "id": "REPLACE_WITH_KV_ID" }]
+}
