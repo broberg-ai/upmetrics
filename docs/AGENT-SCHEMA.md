@@ -80,10 +80,21 @@ compliance reporting + cost analytics without JSON parsing.
 ## For cost-sink authors (`@broberg/ai-sdk` → `upmetricsSink`)
 
 `@broberg/ai-sdk` emits a camelCase `Usage` per call; this endpoint's wire format
-is **snake_case**, and the ingest is **lenient** — it validates nothing beyond the
-four required fields and **silently drops any field it does not read** (see
-`metrics()` in `ingest/agent.ts`). So `upmetricsSink` is a thin but *real* adapter,
-not a 1:1 pass-through. Build it from this table — anything not listed is dropped.
+is **snake_case**. The ingest validates with the posture *strict shape, liberal
+values* (Postel) — see `bodySchema` in `ingest/agent.ts`:
+
+- **Types are validated.** A bad-typed metric (e.g. `cost_usd:"abc"` → non-finite)
+  returns `400 {"error":"invalid_body", issues:[…]}` instead of silently storing
+  `NaN`. Token strings that coerce cleanly (`"420"`) are accepted.
+- **Value-space is OPEN.** `tier`/`provider`/`model`/`agent_kind`/`status` are free
+  strings, never enums — any new provider/tier/capability the SDK grows is accepted
+  + stored, never 400. (`cheap`/`vision` work today.)
+- **Unknown top-level keys are swept into `tags`** — nothing is silently dropped.
+  So `transport`/`capability`/`latencyMs`/any future field still *survives* even if
+  sent top-level. Prefer the mappings below for clean dashboards, but the sweep is
+  your safety net, not a data-loss cliff.
+
+So `upmetricsSink` is a thin but *real* adapter. Build it from this table.
 
 ### `Usage` → wire mapping
 
@@ -94,8 +105,8 @@ not a 1:1 pass-through. Build it from this table — anything not listed is drop
 | `provider` | `provider` | required, pass-through |
 | `model` | `model` | required, pass-through |
 | `tier` | `tier` | pass-through; **free text** — `cheap`/`vision` accepted & stored, no enum reject |
-| `capability` | `tags.capability` | **dropped if sent top-level** — route via `tags` |
-| `transport` | `tags.transport` | **dropped if sent top-level** — route via `tags` (`http`/`subprocess`) |
+| `capability` | `tags.capability` | no top-level column — send via `tags` (or top-level → auto-swept into `tags`) |
+| `transport` | `tags.transport` | no top-level column — send via `tags` (`http`/`subprocess`); top-level → auto-swept |
 | `inputTokens` | `input_tokens` | |
 | `outputTokens` | `output_tokens` | |
 | `cacheReadTokens` | `cache_read_tokens` | |
