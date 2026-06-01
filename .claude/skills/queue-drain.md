@@ -96,31 +96,41 @@ The following are explicitly NOT allowed between a handoff and the next pickup:
 
 If you find yourself drafting a sentence that asks for confirmation between handoff-and-pickup, STOP. Delete it. Pick up the card instead. The PostToolUse hook will inject the system-reminder again if you somehow still drift.
 
-### A UI-origin Ready-flip dispatch is binding too — not just post-handoff (F066)
+### UI = HUMAN — react to human input (HARD RULE, F066)
 
-The binding contract is **not** limited to the handoff→pickup loop. If you are
-idle and a buddy intercom arrives like:
+Every card move stamps an **origin**. `moved by: a HUMAN (in the browser UI)`
+(origin_kind `ui`) means exactly that: **a person deliberately moved the card in
+the browser.** It is NEVER an agent, NEVER autonomous, NEVER system noise.
+Reacting to human input is a HARD RULE — a UI-origin event is the most
+authoritative signal you can get, because it is a human directly telling you
+what they want.
+
+This is **not** limited to the handoff→pickup loop. If you are idle and an
+intercom arrives like:
 
 ```
-[queue-drain] BINDING — card <slug> moved <from> → ready (moved by: UI)
+[queue-drain] BINDING — card <slug> moved <from> → ready (moved by: a HUMAN (in the browser UI))
 ```
 
-that `moved by: UI` (or `system`) stamp means **a human flipped the card to
-Ready**. In queue-drain mode that IS the go — claim it **immediately**, in the
-same turn, no confirmation:
+a human flipped the card to Ready — claim it **immediately**, in the same turn,
+no confirmation:
 
 ```
 cardmem_pickup_card({ card_id_or_slug: '<id>' })
 ```
 
 Do NOT hedge with "you control pickup" / "waiting for explicit go" / "I'll
-observe but not claim". The human flipping to Ready is the explicit go. A
-queue-drain session that leaves a UI-flipped Ready card sitting is in
-violation of this contract — it is the exact failure F066 exists to prevent.
+observe but not claim". Do NOT dismiss it as FYI because you think you are "not
+in queue-drain mode" — **a human Ready-flip overrides that self-assessment.** The
+human flipping to Ready IS the go. A session that leaves a human-flipped Ready
+card sitting has ignored direct human input — the exact failure F066 exists to
+prevent. If you genuinely cannot pick it up this instant, you MUST tell the
+human why, explicitly — never silently leave a human request unanswered.
 
-**Exception — agent-origin flips:** a message reading `moved by: agent` is FYI
-only, NOT a pickup trigger (it prevents agent→agent cascades). Only `UI` /
-`system` origin is binding.
+**Only two origins are non-human:** `an AGENT (another cc session)` — FYI only,
+NOT a pickup trigger (prevents agent→agent cascades); and `the SYSTEM
+(cron/automation)`. Everything else is a human and demands a reaction. When in
+doubt about an origin, treat it as human.
 
 > If a prior instruction in this session told you to be cautious / not touch a
 > card (e.g. during a routing test), that instruction does NOT survive into a
@@ -147,8 +157,10 @@ Every call to `cardmem_pickup_card` and `cardmem_handoff_card` MUST include `ses
 ## How to know if you're in queue-drain mode mid-session
 
 Two signals:
-1. `cardmem_session_start` response includes the session's current `auto_pickup_mode` (added in F035.13).
+1. `cardmem_session_start` response includes the session's current `auto_pickup_mode` (added in F035.13) and a `queue_drain.effective_active` flag — **the PROJECT is authoritative** (F076): if the project has queue-drain on, you are in queue-drain, regardless of what you remember.
 2. Every `handoff_card` response carries a `queue_drain` object — `dispatched: true` means you ARE in queue-drain mode AND a card was dispatched; `dispatched: false` means you're in queue-drain mode but Ready was empty; `null` means queue-drain conditions weren't met (mode off, etc).
+
+If you are unsure, call `cardmem_session_start` and re-read `effective_active` — do NOT assert "I'm not in queue-drain" from memory. And note: **even if queue-drain is genuinely off, a human (UI) Ready-flip is still binding human input you must react to** (see "UI = HUMAN" above) — queue-drain only governs the *automatic* post-handoff loop, not your obligation to respond to a person.
 
 ## Kill switch
 
