@@ -10,5 +10,31 @@
     { "name": "incidents", "path": "/incidents", "mode": "element", "selector": "[data-testid=\"incidents-root\"]", "waitFor": "[data-testid=\"incidents-root\"]" },
     { "name": "remediation", "path": "/remediation", "mode": "element", "selector": "[data-testid=\"remediation-root\"]", "waitFor": "[data-testid=\"remediation-root\"]" },
     { "name": "project-detail", "path": "/projects/upmetrics", "mode": "element", "selector": "[data-testid=\"project-detail-root\"]", "waitFor": "[data-testid=\"project-detail-root\"]", "assert": "const t=document.querySelector('[data-testid=\"project-detail-root\"]').innerText; return { pass: /sdk\\s*0\\.1\\.4/.test(t), detail: (t.match(/upmetrics-server[^\\n]*/)||[''])[0] }" }
+  ],
+  "flows": [
+    {
+      "name": "dashboard-smoke",
+      "base_url": "https://upmetrics.org",
+      "mutates": false,
+      "steps": [
+        { "type": "goto", "path": "/" },
+        { "type": "expectVisible", "testid": "overview-root" },
+        { "type": "screenshot", "label": "overview" },
+        { "type": "goto", "path": "/issues" },
+        { "type": "expectVisible", "testid": "issues-root" },
+        { "type": "screenshot", "label": "issues" },
+        { "type": "goto", "path": "/agents" },
+        { "type": "expectVisible", "testid": "agents-root" },
+        { "type": "goto", "path": "/probes" },
+        { "type": "expectVisible", "testid": "probes-root" },
+        { "type": "goto", "path": "/incidents" },
+        { "type": "expectVisible", "testid": "incidents-root" },
+        { "type": "goto", "path": "/remediation" },
+        { "type": "expectVisible", "testid": "remediation-root" },
+        { "type": "goto", "path": "/projects/upmetrics" },
+        { "type": "expectVisible", "testid": "project-detail-root" },
+        { "type": "screenshot", "label": "project-detail" }
+      ]
+    }
   ]
 }
