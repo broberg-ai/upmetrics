@@ -3,7 +3,7 @@
   "base_url": "https://upmetrics.org",
   "auth": { "adapter": "storageState", "statePath": ".lens/storage-state.json" },
   "surfaces": [
-    { "name": "overview", "path": "/", "mode": "element", "selector": "[data-testid=\"overview-root\"]", "waitFor": "[data-testid=\"overview-root\"]" },
+    { "name": "overview", "path": "/", "mode": "element", "selector": "[data-testid=\"overview-root\"]", "waitFor": "[data-testid=\"overview-root\"]", "baseline_key": "overview" },
     { "name": "issues", "path": "/issues", "mode": "element", "selector": "[data-testid=\"issues-root\"]", "waitFor": "[data-testid=\"issues-root\"]" },
     { "name": "agents", "path": "/agents", "mode": "element", "selector": "[data-testid=\"agents-root\"]", "waitFor": "[data-testid=\"agents-root\"]" },
     { "name": "probes", "path": "/probes", "mode": "element", "selector": "[data-testid=\"probes-root\"]", "waitFor": "[data-testid=\"probes-root\"]" },
