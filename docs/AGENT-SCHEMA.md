@@ -76,3 +76,60 @@ Mirrors PLAN §5: `id`, `schema_version` (default 1), `project_id`, `session_id`
 
 `purpose`, `provider`, `tier` are first-class columns (not just tags) for
 compliance reporting + cost analytics without JSON parsing.
+
+## For cost-sink authors (`@broberg/ai-sdk` → `upmetricsSink`)
+
+`@broberg/ai-sdk` emits a camelCase `Usage` per call; this endpoint's wire format
+is **snake_case**, and the ingest is **lenient** — it validates nothing beyond the
+four required fields and **silently drops any field it does not read** (see
+`metrics()` in `ingest/agent.ts`). So `upmetricsSink` is a thin but *real* adapter,
+not a 1:1 pass-through. Build it from this table — anything not listed is dropped.
+
+### `Usage` → wire mapping
+
+| `Usage` (camelCase) | wire field | notes |
+|---|---|---|
+| — (**required**) | `agent_kind` | NOT in `Usage` — sink must inject. Enum advisory only (not enforced); use `chatbot` for SDK calls, `embedding` for embeddings. |
+| — (**required**) | `agent_name` | NOT in `Usage` — sink must inject. Configure per consumer (e.g. `cms`, `trail`), NOT the capability. Dashboards group "runs per agent_name". |
+| `provider` | `provider` | required, pass-through |
+| `model` | `model` | required, pass-through |
+| `tier` | `tier` | pass-through; **free text** — `cheap`/`vision` accepted & stored, no enum reject |
+| `capability` | `tags.capability` | **dropped if sent top-level** — route via `tags` |
+| `transport` | `tags.transport` | **dropped if sent top-level** — route via `tags` (`http`/`subprocess`) |
+| `inputTokens` | `input_tokens` | |
+| `outputTokens` | `output_tokens` | |
+| `cacheReadTokens` | `cache_read_tokens` | |
+| `cacheCreationTokens` | `cache_creation_tokens` | |
+| `costUsd` | `cost_usd` | `0` for subprocess — fine |
+| `toolCalls[].errorCount` | `tool_calls[].error_count` | **deep rename** inside each array element |
+| `latencyMs` | `duration_ms` | rename; OR send `started_at`+`ended_at` and let the server compute it |
+| `ts` | `started_at` | ISO-8601 or epoch ms; set `ended_at` = `ts` (+ latency) |
+| `purpose` | `purpose` | pass-through (compliance label) |
+
+### Required minimum body (else `400 missing_fields`)
+`agent_kind`, `agent_name`, `provider`, `model`. Auth header `X-Upmetrics-Key:
+<project api_key>` (per-project; `401` on missing/invalid).
+
+### Mode choice
+- one-shot completed call → `mode:"record"` (default).
+- streamed / long call → `mode:"start"` (returns `run_id`) then `mode:"finish"`
+  with `run_id` + metrics. Map the SDK's `agentRun()` lifecycle onto this; map a
+  resolved call onto `record`. Do **not** also use `@upmetrics/agent.wrapAnthropic`
+  inside the SDK — the SDK already owns the provider call (double-instrumentation).
+
+### Example `record` body the sink should POST
+```json
+{ "mode":"record", "agent_kind":"chatbot", "agent_name":"cms",
+  "provider":"google", "model":"gemini-2.0-flash", "tier":"cheap",
+  "input_tokens":420, "output_tokens":180, "cost_usd":0.00009,
+  "tool_calls":[{"name":"none","count":0,"error_count":0}],
+  "started_at":"2026-06-02T10:00:00.000Z", "ended_at":"2026-06-02T10:00:01.200Z",
+  "purpose":"ui-string-translation",
+  "tags":{"capability":"translate","transport":"http","sdk":"@broberg/ai-sdk@0.1.0"} }
+```
+
+### Open decision for the ai-sdk team
+`transport` (free Max-subprocess vs paid API) lives only in `tags` for v1. If
+dashboards need free/paid as a first-class axis beyond `cost_usd=0`, ping the
+upmetrics session — a `transport` column + dashboard facet is a small migration
+here. Same offer for `capability`. Default v1: keep both in `tags`.
