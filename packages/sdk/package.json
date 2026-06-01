@@ -1,6 +1,6 @@
 {
   "name": "@upmetrics/sdk",
-  "version": "0.1.2",
+  "version": "0.1.3",
   "description": "Upmetrics error-tracking SDK for browser/node/bun — Sentry-envelope compatible, PII-scrubbed.",
   "license": "MIT",
   "type": "module",
@@ -24,8 +24,9 @@
     "directory": "packages/sdk"
   },
   "scripts": {
-    "build": "tsc",
-    "typecheck": "tsc --noEmit"
+    "gen-version": "node scripts/gen-version.mjs",
+    "build": "node scripts/gen-version.mjs && tsc",
+    "typecheck": "node scripts/gen-version.mjs && tsc --noEmit"
   },
   "devDependencies": {
     "typescript": "^5.7.2"

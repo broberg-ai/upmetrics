@@ -33,7 +33,7 @@ export function Remediation() {
   const { loading, data, error } = useApi<{ pending: Pending[]; history: History[] }>('/dashboard/remediation');
 
   return (
-    <div>
+    <div data-testid="remediation-root">
       <PageHeader title="Remediation" subtitle="Issues relayed to Buddy → the responsible cc session fixes the root cause" />
       {loading ? (
         <Loading />

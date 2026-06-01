@@ -1,6 +1,7 @@
 // @upmetrics/sdk — error capture for browser/node/bun. Sends Sentry-format
 // envelopes to the Upmetrics ingest endpoint. PII-scrubbed by default.
 import { scrub } from './scrub';
+import { SDK_VERSION } from './version';
 
 export interface InitOptions {
   dsn: string;
@@ -76,6 +77,9 @@ function baseEvent(): Record<string, unknown> {
     platform: 'javascript',
     environment: config?.environment,
     release: config?.release,
+    // Self-stamp the SDK version (Sentry-style) so the dashboard can show which
+    // @upmetrics/sdk each surface runs + surface fleet drift (F012).
+    sdk: { name: '@upmetrics/sdk', version: SDK_VERSION },
     tags: { ...scope.tags },
     user: scope.user,
     breadcrumbs: scope.breadcrumbs.length ? [...scope.breadcrumbs] : undefined,

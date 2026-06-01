@@ -11,6 +11,7 @@ interface Component {
   total: number;
   errors: number;
   last_seen: number | null;
+  sdk_version: string | null;
 }
 interface Detail {
   project: { id: string; name: string; platform: string };
@@ -19,6 +20,7 @@ interface Detail {
   total_events: number;
   cost_today: number;
   cost_total: number;
+  latest_sdk_version: string | null;
   components: Component[];
 }
 interface CompError {
@@ -70,7 +72,7 @@ export function ProjectDetail({ id }: { id?: string }) {
   const [open, setOpen] = useState<string | null>(null);
 
   return (
-    <div>
+    <div data-testid="project-detail-root">
       <a href="/" class="mb-3 inline-flex items-center gap-1 text-sm text-[var(--muted)] transition hover:text-[var(--text)]">
         <ArrowLeft size={14} /> Overview
       </a>
@@ -118,6 +120,16 @@ export function ProjectDetail({ id }: { id?: string }) {
                         </div>
                         <div class="flex shrink-0 items-center gap-3 text-xs text-[var(--muted)]">
                           {comp.errors > 0 && <span style={{ color: 'var(--warn)' }}>{comp.errors} err</span>}
+                          {comp.sdk_version ? (
+                            <span
+                              style={data.latest_sdk_version && comp.sdk_version !== data.latest_sdk_version ? { color: 'var(--warn)' } : undefined}
+                              title={data.latest_sdk_version && comp.sdk_version !== data.latest_sdk_version ? `outdated — newest is ${data.latest_sdk_version}` : 'SDK version'}
+                            >
+                              sdk {comp.sdk_version}
+                            </span>
+                          ) : (
+                            <span title="no SDK version stamped (pre-0.1.3)">sdk —</span>
+                          )}
                           <span>{comp.total} events</span>
                           <span>{fmtRel(comp.last_seen)}</span>
                         </div>

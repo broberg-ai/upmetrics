@@ -60,3 +60,18 @@ export async function deleteProbeJob(jobId: string): Promise<void> {
 export async function setProbeJobEnabled(jobId: string, enabled: boolean): Promise<void> {
   await cj(`/api/jobs/${jobId}`, { method: 'PUT', body: JSON.stringify({ enabled }) });
 }
+
+// Re-sync the trigger job when a probe is edited (F006.5). Updates the schedule
+// (on interval change) + the display name in place — no delete/recreate, so the
+// job id and its run history are preserved.
+export async function updateProbeJob(
+  jobId: string,
+  opts: { name?: string; intervalSeconds?: number },
+): Promise<void> {
+  const body: Record<string, unknown> = {};
+  if (opts.name !== undefined) body.name = `upmetrics-probe: ${opts.name}`;
+  if (opts.intervalSeconds !== undefined) body.schedule = intervalToCron(opts.intervalSeconds);
+  if (Object.keys(body).length === 0) return;
+  const res = await cj(`/api/jobs/${jobId}`, { method: 'PUT', body: JSON.stringify(body) });
+  if (!res.ok) throw new Error(`cronjobs update failed: ${res.status}`);
+}

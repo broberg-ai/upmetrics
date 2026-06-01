@@ -36,7 +36,7 @@ export function Overview() {
   const { loading, data, error } = useApi<OverviewData>('/dashboard/overview');
 
   return (
-    <div>
+    <div data-testid="overview-root">
       <PageHeader title="Overview" subtitle="Health across all projects" />
       {loading ? (
         <Loading />

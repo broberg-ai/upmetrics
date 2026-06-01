@@ -1,6 +1,6 @@
 import { useState } from 'preact/hooks';
 import { useLocation } from 'preact-iso';
-import { Send } from 'lucide-preact';
+import { Send, Github } from 'lucide-preact';
 import { useApi } from '../lib/useApi';
 import { api } from '../lib/api';
 import { fmtDate, fmtRel } from '../lib/format';
@@ -43,6 +43,7 @@ interface Detail {
   issue: Issue;
   events: EventRow[];
   related_agent_runs: AgentRunRow[];
+  github_repo: string | null;
 }
 
 const LEVEL_TONE: Record<string, 'down' | 'warn' | 'muted'> = { error: 'down', warning: 'warn', fatal: 'down', info: 'muted' };
@@ -72,7 +73,7 @@ export function Issues() {
   ];
 
   return (
-    <div>
+    <div data-testid="issues-root">
       <PageHeader title="Issues" subtitle="Grouped errors across projects" />
       <div class="mb-4 flex flex-wrap items-center gap-2">
         <CustomSelect value={project ?? ''} options={projectOpts} onChange={(v) => setProject(v || null)} />
@@ -263,6 +264,18 @@ function IssueDetail({ id, onClose, onChanged }: { id: string; onClose: () => vo
             <Button variant="ghost" loading={busy} onClick={() => setStatus('unresolved')}>
               Reopen
             </Button>
+            {data.github_repo && (
+              <a
+                href={`https://github.com/${data.github_repo}/issues/new?title=${encodeURIComponent(data.issue.title)}&body=${encodeURIComponent(`Culprit: ${data.issue.culprit ?? '—'}\nLevel: ${data.issue.level}\nFirst seen: ${data.issue.firstSeen}\n\nupmetrics issue: ${location.origin}/issues?project=${data.issue.projectId}`)}`}
+                target="_blank"
+                rel="noopener noreferrer"
+                class="inline-flex items-center gap-2 rounded-md border px-3 py-1.5 text-sm font-medium transition hover:bg-[var(--surface-2)] active:scale-[0.97] focus:outline-none focus-visible:ring-2 focus-visible:ring-[var(--primary)]"
+                style={{ borderColor: 'var(--border)' }}
+                title={`Open a prefilled new issue on github.com/${data.github_repo}`}
+              >
+                <Github size={14} /> Create GitHub issue
+              </a>
+            )}
             <Button variant="outline" loading={busy} onClick={pushRemediation} class="ml-auto" title="Send this issue to Buddy → a cc session fixes it">
               <Send size={14} /> Push to remediation
             </Button>

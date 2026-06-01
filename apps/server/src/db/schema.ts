@@ -23,6 +23,9 @@ export const projects = sqliteTable('projects', {
   // F010 — auto-remediation relay. repo = the repo basename Buddy maps to a cc
   // session; remediation_relay opts the project into the pull-feed.
   repo: text('repo'), // e.g. "cardmem", "fysiodk-aalborg-sport"
+  // F006.3 — full "owner/repo" slug for the "Create GitHub issue" deep-link on
+  // an issue (distinct from `repo`, which is just the basename Buddy routes on).
+  githubRepo: text('github_repo'), // e.g. "broberg-ai/upmetrics"
   remediationRelay: integer('remediation_relay', { mode: 'boolean' }).notNull().default(false),
   createdAt: integer('created_at', { mode: 'timestamp_ms' }).notNull(),
   updatedAt: integer('updated_at', { mode: 'timestamp_ms' }).notNull(),

@@ -1,4 +1,5 @@
 import { useState } from 'preact/hooks';
+import { useLocation } from 'preact-iso';
 import { useApi } from '../lib/useApi';
 import { api } from '../lib/api';
 import { fmtDate, fmtRel } from '../lib/format';
@@ -33,8 +34,10 @@ const SEV_TONE: Record<string, 'down' | 'warn' | 'muted'> = { critical: 'down', 
 const STATUS_TONE: Record<string, 'down' | 'warn' | 'ok'> = { open: 'down', acknowledged: 'warn', resolved: 'ok' };
 
 export function Incidents() {
+  const { query } = useLocation();
   const [status, setStatus] = useState<string | null>('open');
-  const [sel, setSel] = useState<string | null>(null);
+  // Deep-link from a Discord alert: /incidents?id=<incidentId> opens it (F012).
+  const [sel, setSel] = useState<string | null>(query?.id ?? null);
   const qs = status ? `?status=${status}` : '';
   const list = useApi<{ incidents: Incident[] }>(`/dashboard/incidents${qs}`);
 
@@ -46,7 +49,7 @@ export function Incidents() {
   ];
 
   return (
-    <div>
+    <div data-testid="incidents-root">
       <PageHeader
         title="Incidents"
         subtitle="Correlated incidents + remediation"

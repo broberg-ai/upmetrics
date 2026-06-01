@@ -155,3 +155,7 @@ vite.config.ts.timestamp-*
 *.db-wal
 local.db
 apps/server/web-dist/
+
+# Lens visual-verification (contains a session cookie)
+.lens/
+packages/sdk/src/version.ts

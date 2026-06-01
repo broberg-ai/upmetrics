@@ -4,6 +4,7 @@ import { useApi } from '../lib/useApi';
 import { api } from '../lib/api';
 import { fmtDate, fmtRel } from '../lib/format';
 import { Card, Badge, Button, StatusDot } from '../components/ui/controls';
+import { CustomSelect } from '../components/ui/select';
 import { Modal } from '../components/ui/modal';
 import { Loading, ErrorBox, Empty, PageHeader } from '../components/PageState';
 import { useToast } from '../components/ui/toast';
@@ -52,7 +53,7 @@ export function Probes() {
   const [sel, setSel] = useState<string | null>(null);
 
   return (
-    <div>
+    <div data-testid="probes-root">
       <PageHeader title="Probes" subtitle="Uptime checks (executed by cronjobs, Model A)" />
       {loading ? (
         <Loading />
@@ -89,7 +90,49 @@ function ProbeDetail({ id, onClose, onChanged }: { id: string; onClose: () => vo
   const { loading, data, error, reload } = useApi<{ probe: Probe; history: Result[]; last_failure: Result | null }>(`/dashboard/probes/${id}`);
   const [busy, setBusy] = useState(false);
   const [confirmDel, setConfirmDel] = useState(false);
+  const [editing, setEditing] = useState(false);
+  const [form, setForm] = useState({ name: '', target: '', interval: '300', expected: '' });
   const toast = useToast();
+
+  const INTERVALS = [
+    { value: '60', label: 'Every 1 min' },
+    { value: '300', label: 'Every 5 min' },
+    { value: '600', label: 'Every 10 min' },
+    { value: '1800', label: 'Every 30 min' },
+    { value: '3600', label: 'Every hour' },
+  ];
+  const openEdit = (p: Probe) => {
+    const raw = p as unknown as { intervalSeconds?: number; config?: { expected_status?: number } };
+    setForm({
+      name: p.name,
+      target: p.target,
+      interval: String(raw.intervalSeconds ?? 300),
+      expected: raw.config?.expected_status != null ? String(raw.config.expected_status) : '',
+    });
+    setEditing(true);
+  };
+  const save = async () => {
+    setBusy(true);
+    try {
+      await api(`/dashboard/probes/${id}`, {
+        method: 'POST',
+        body: JSON.stringify({
+          name: form.name,
+          target: form.target,
+          interval_seconds: Number(form.interval),
+          ...(form.expected.trim() ? { config: { expected_status: Number(form.expected) } } : {}),
+        }),
+      });
+      toast('Probe updated', 'success');
+      setEditing(false);
+      reload();
+      onChanged();
+    } catch {
+      toast('Update failed', 'error');
+    } finally {
+      setBusy(false);
+    }
+  };
 
   const act = async (path: string, method = 'POST') => {
     setBusy(true);
@@ -153,6 +196,44 @@ function ProbeDetail({ id, onClose, onChanged }: { id: string; onClose: () => vo
             </div>
           )}
 
+          {editing && (
+            <div class="space-y-2 rounded-md border p-3" style={{ borderColor: 'var(--border)' }}>
+              <div class="text-sm font-medium">Edit probe</div>
+              <input
+                value={form.name}
+                onInput={(e) => setForm({ ...form, name: (e.target as HTMLInputElement).value })}
+                placeholder="Name"
+                class="w-full rounded-md border px-3 py-1.5 text-sm focus:outline-none focus-visible:ring-2 focus-visible:ring-[var(--primary)]"
+                style={{ background: 'var(--bg)', borderColor: 'var(--border)' }}
+              />
+              <input
+                value={form.target}
+                onInput={(e) => setForm({ ...form, target: (e.target as HTMLInputElement).value })}
+                placeholder="Target URL"
+                class="w-full rounded-md border px-3 py-1.5 text-sm focus:outline-none focus-visible:ring-2 focus-visible:ring-[var(--primary)]"
+                style={{ background: 'var(--bg)', borderColor: 'var(--border)' }}
+              />
+              <div class="flex flex-wrap gap-2">
+                <CustomSelect value={form.interval} options={INTERVALS} onChange={(v) => setForm({ ...form, interval: v })} />
+                <input
+                  value={form.expected}
+                  onInput={(e) => setForm({ ...form, expected: (e.target as HTMLInputElement).value })}
+                  placeholder="Expected status (e.g. 200)"
+                  class="w-40 rounded-md border px-3 py-1.5 text-sm focus:outline-none focus-visible:ring-2 focus-visible:ring-[var(--primary)]"
+                  style={{ background: 'var(--bg)', borderColor: 'var(--border)' }}
+                />
+              </div>
+              <div class="flex gap-2">
+                <Button variant="primary" loading={busy} onClick={save}>
+                  Save changes
+                </Button>
+                <Button variant="ghost" onClick={() => setEditing(false)}>
+                  Cancel
+                </Button>
+              </div>
+            </div>
+          )}
+
           <div class="flex flex-wrap gap-2 border-t pt-3" style={{ borderColor: 'var(--border)' }}>
             {data.probe.status === 'paused' ? (
               <Button variant="primary" loading={busy} onClick={() => act('/resume')}>
@@ -161,6 +242,11 @@ function ProbeDetail({ id, onClose, onChanged }: { id: string; onClose: () => vo
             ) : (
               <Button variant="outline" loading={busy} onClick={() => act('/pause')}>
                 Pause
+              </Button>
+            )}
+            {!editing && (
+              <Button variant="outline" onClick={() => openEdit(data.probe)}>
+                Edit
               </Button>
             )}
             {confirmDel ? (

@@ -128,8 +128,12 @@ async function deliver(
         if (!config.resendApiKey || !project.alertEmail) throw new Error('email channel not configured');
         await sendEmail(project.alertEmail, subject, incident, project);
       } else if (ch === 'discord') {
-        if (!project.alertDiscordWebhook) throw new Error('discord channel not configured');
-        await sendDiscord(project.alertDiscordWebhook, subject, incident);
+        // Per-project webhook wins; otherwise fall back to the single fleet
+        // webhook (FLEET_ALERT_DISCORD_WEBHOOK) so the URL has one source, not
+        // a copy per project.
+        const webhook = project.alertDiscordWebhook || config.fleetAlertDiscordWebhook;
+        if (!webhook) throw new Error('discord channel not configured');
+        await sendDiscord(webhook, subject, incident);
       } else if (ch === 'webhook') {
         const url = ((rule.condition ?? {}) as { webhook_url?: string }).webhook_url;
         if (!url) throw new Error('webhook channel has no condition.webhook_url');
@@ -164,7 +168,10 @@ async function sendDiscord(webhookUrl: string, subject: string, incident: Incide
   const res = await fetch(webhookUrl, {
     method: 'POST',
     headers: { 'content-type': 'application/json' },
-    body: JSON.stringify({ embeds: [{ title: subject, description: `kind: ${incident.kind}`, color }] }),
+    // Title links straight to the flagged case (no token — the recipient is
+    // already authed via cookie; a login token in a Discord channel would be
+    // insecure). F012.
+    body: JSON.stringify({ embeds: [{ title: subject, url: `${config.authBaseUrl}/incidents?id=${incident.id}`, description: `kind: ${incident.kind}`, color }] }),
   });
   if (!res.ok && res.status !== 204) throw new Error(`discord ${res.status}`);
 }

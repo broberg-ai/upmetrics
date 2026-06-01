@@ -5,7 +5,7 @@ import type { Context, Hono } from 'hono';
 import { and, desc, eq, gte, isNotNull, lte, or, sql } from 'drizzle-orm';
 import { getDb, schema } from '../db';
 import { auth } from '../auth';
-import { deleteProbeJob, setProbeJobEnabled } from '../probes/cronjobs';
+import { deleteProbeJob, setProbeJobEnabled, updateProbeJob } from '../probes/cronjobs';
 import { dispatchRemediation } from '../incidents/remediation';
 import { pendingRemediations } from '../incidents/relay';
 
@@ -92,6 +92,10 @@ export function registerDashboardRoutes(app: Hono): void {
         total: sql<number>`count(*)`,
         errors: sql<number>`sum(case when ${schema.events.kind} = 'error' then 1 else 0 end)`,
         last_seen: sql<number>`max(${schema.events.receivedAt})`,
+        // F012 — SDK version of the LATEST event per release. SQLite returns a
+        // bare column from the same row as max() in the SELECT, so this is the
+        // newest event's stamped version (null for pre-F012 events).
+        sdk_version: sql<string | null>`json_extract(${schema.events.payload}, '$.sdk.version')`,
       })
       .from(schema.events)
       .where(eq(schema.events.projectId, pid))
@@ -105,8 +109,15 @@ export function registerDashboardRoutes(app: Hono): void {
         total: Number(r.total),
         errors: Number(r.errors),
         last_seen: r.last_seen ? Number(r.last_seen) : null,
+        sdk_version: r.sdk_version ?? null,
       }))
       .sort((a, b) => (b.last_seen ?? 0) - (a.last_seen ?? 0));
+
+    // Newest SDK version seen across this project's surfaces → the dashboard
+    // marks anything behind it as drifted (F012).
+    const cmpVer = (a: string, b: string) =>
+      a.split('.').map(Number).reduce((acc, n, i) => acc || (n - (Number(b.split('.')[i]) || 0)), 0);
+    const latestSdkVersion = components.map((x) => x.sdk_version).filter((v): v is string => !!v).sort(cmpVer).at(-1) ?? null;
 
     const costAgg = (where: any) =>
       Number(db.select({ s: sql<number>`coalesce(sum(cost_usd),0)` }).from(schema.agentRuns).where(where).get()?.s ?? 0);
@@ -118,6 +129,7 @@ export function registerDashboardRoutes(app: Hono): void {
       total_events: components.reduce((a, x) => a + x.total, 0),
       cost_today: costAgg(and(eq(schema.agentRuns.projectId, pid), gte(schema.agentRuns.startedAt, today))),
       cost_total: costAgg(eq(schema.agentRuns.projectId, pid)),
+      latest_sdk_version: latestSdkVersion,
       components,
     });
   });
@@ -211,7 +223,9 @@ export function registerDashboardRoutes(app: Hono): void {
       .orderBy(desc(schema.agentRuns.startedAt))
       .limit(20)
       .all();
-    return c.json({ issue, events, related_agent_runs: relatedRuns });
+    // F006.3 — the project's "owner/repo" for the Create-GitHub-issue deep-link.
+    const project = db.select({ githubRepo: schema.projects.githubRepo }).from(schema.projects).where(eq(schema.projects.id, issue.projectId)).get();
+    return c.json({ issue, events, related_agent_runs: relatedRuns, github_repo: project?.githubRepo ?? null });
   });
 
   // Issue actions — resolve / ignore / reopen.
@@ -465,6 +479,41 @@ export function registerDashboardRoutes(app: Hono): void {
     db.update(schema.probes).set({ status: 'up' }).where(eq(schema.probes.id, probe.id)).run();
     return c.json({ ok: true });
   });
+  // Edit (F006.5) — update name/target/interval/config in place. On interval or
+  // name change, re-sync the cronjobs trigger job (no delete/recreate). The
+  // config.runToken is preserved so the run endpoint keeps authenticating.
+  app.post('/api/dashboard/probes/:id', async (c) => {
+    if (!(await requireUser(c))) return c.json({ error: 'unauthorized' }, 401);
+    const db = getDb();
+    const probe = db.select().from(schema.probes).where(eq(schema.probes.id, c.req.param('id'))).get();
+    if (!probe) return c.json({ error: 'not_found' }, 404);
+    const b = (await c.req.json().catch(() => ({}))) as { name?: string; target?: string; interval_seconds?: number; config?: Record<string, unknown> };
+    const set: Record<string, unknown> = {};
+    if (typeof b.name === 'string' && b.name.trim()) set.name = b.name.trim();
+    if (typeof b.target === 'string' && b.target.trim()) set.target = b.target.trim();
+    let intervalChanged = false;
+    if (b.interval_seconds !== undefined) {
+      const iv = Number(b.interval_seconds);
+      if (!Number.isInteger(iv) || iv < 60) return c.json({ error: 'interval_seconds must be an integer >= 60' }, 400);
+      intervalChanged = iv !== probe.intervalSeconds;
+      set.intervalSeconds = iv;
+    }
+    if (b.config && typeof b.config === 'object') {
+      const prev = (probe.config ?? {}) as Record<string, unknown>;
+      set.config = { ...prev, ...b.config, runToken: prev.runToken }; // never drop the run token
+    }
+    if (Object.keys(set).length === 0) return c.json({ error: 'no_fields' }, 400);
+    db.update(schema.probes).set(set).where(eq(schema.probes.id, probe.id)).run();
+    if (probe.cronjobsJobId && (set.name !== undefined || intervalChanged)) {
+      try {
+        await updateProbeJob(probe.cronjobsJobId, { name: set.name as string | undefined, intervalSeconds: intervalChanged ? (set.intervalSeconds as number) : undefined });
+      } catch (err) {
+        return c.json({ ok: true, cronjobs_synced: false, error: (err as Error).message }, 502);
+      }
+    }
+    return c.json({ ok: true, cronjobs_synced: true });
+  });
+
   // Delete — cascades to cronjobs job + result history (F004).
   app.delete('/api/dashboard/probes/:id', async (c) => {
     if (!(await requireUser(c))) return c.json({ error: 'unauthorized' }, 401);

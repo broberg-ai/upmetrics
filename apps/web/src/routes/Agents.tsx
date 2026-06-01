@@ -95,7 +95,7 @@ export function Agents() {
   ];
 
   return (
-    <div>
+    <div data-testid="agents-root">
       <PageHeader title="Agents" subtitle="AI agent telemetry — cost, sessions, tool failures" right={<CustomSelect value={project ?? ''} options={projectOpts} onChange={(v) => setProject(v || null)} />} />
 
       {agg.loading ? (
