@@ -44,6 +44,16 @@ session_args=$(
 
 session_resp=$(call_mcp cardmem_session_start "$session_args")
 
+# F060.2 — adopt-forcing reminder, re-asserted every turn until cloud says Init
+# is done (init.required from session_start). The full skill was inlined at
+# session-start; this keeps it binding without re-printing it each turn.
+init_required=$(printf '%s' "$session_resp" | jq -r '.init.required // false')
+if [[ "$init_required" == "true" ]]; then
+  printf '<cardmem-adopt-required>\n'
+  printf 'Adoption is still your ONLY task — cardmem Init is NOT complete. Follow the adopt skill inlined at session-start (full text in .claude/skills/adopt.md). Do not shortcut via card task-text, do not start unrelated work, do not edit CLAUDE.md.\n'
+  printf '</cardmem-adopt-required>\n'
+fi
+
 # Strip channel-echo blocks before regex'ing — buddy intercom messages
 # arrive embedded in user prompts when Christian pastes/quotes them.
 # Auto-claiming on our own bridge-echo creates loops (e.g., a "Review →

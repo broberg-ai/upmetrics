@@ -63,6 +63,17 @@ if [[ -z "$result" ]]; then
   exit 0
 fi
 
+# F060.2 — adopt-forcing. If cloud says this repo's Init isn't done, INLINE the
+# full adopt skill so the session can't shortcut past reading a file. Cloud-
+# authoritative (init.required from session_start), never a local marker.
+init_required=$(printf '%s' "$result" | jq -r '.init.required // false')
+if [[ "$init_required" == "true" && -f "$DIR/../skills/adopt.md" ]]; then
+  printf '<cardmem-adopt-required>\n'
+  printf 'This repo is imported into cardmem but its Init is NOT complete. Adoption is your ONLY task until it is done. The full step-by-step guide is inlined below — do NOT shortcut via card task-text, do NOT start unrelated work, do NOT edit CLAUDE.md. Follow it top to bottom:\n\n'
+  cat "$DIR/../skills/adopt.md"
+  printf '\n</cardmem-adopt-required>\n'
+fi
+
 # Build the <projects:state> block. Keep it tight — capped budget per docs.
 printf '<projects:state>\n'
 
