@@ -112,6 +112,12 @@ expectAbsent expectText assert screenshot`. **Bulk + parallel** via a loop block
 (each in its own authed page). A failing iteration is reported per-item — it
 doesn't abort the others. Resume a half-finished bulk run with `from: <index>`.
 
+**Screenshot timing:** a `screenshot` step grabs whatever is on screen NOW. If a
+route mounts its shell then hydrates data via async fetch, an `expectVisible` on
+the root passes before the data lands — the shot catches a half-loaded page. Put
+an `expectText [data-node] ~ <value>` (which polls until the substring appears)
+BEFORE the `screenshot` step to guarantee hydrated content in the image.
+
 **Run JSON flows directly:** `lens_run_flow({ project, flow, from? })` /
 `POST /lens/flow`. A flow can also live in `lens.manifest.json` under a `flows[]`
 block; `POST /lens/flow-gate { local_path }` runs every flow + cross-checks each
