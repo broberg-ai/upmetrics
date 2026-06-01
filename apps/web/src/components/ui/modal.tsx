@@ -25,7 +25,7 @@ export function Modal({
   return (
     <div class="fixed inset-0 z-50 flex items-center justify-center p-4" style={{ background: 'rgba(0,0,0,0.55)' }} onClick={onClose}>
       <div
-        class="w-full max-w-lg rounded-xl border p-5 shadow-2xl"
+        class="max-h-[85vh] w-full max-w-lg overflow-y-auto rounded-xl border p-5 shadow-2xl"
         style={{ background: 'var(--surface)', borderColor: 'var(--border)' }}
         onClick={(e) => e.stopPropagation()}
       >
