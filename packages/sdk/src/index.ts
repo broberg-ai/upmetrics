@@ -40,6 +40,15 @@ function parseDsn(dsn: string): Dsn {
 export function init(options: InitOptions): void {
   config = { ...options, parsed: parseDsn(options.dsn) };
   if (options.autoInstrument !== false) installAutoInstrument();
+  // Emit one lightweight startup event per JS context so a surface + its SDK
+  // version show up in the dashboard from boot — even if it never errors.
+  // Without this, a healthy surface stamps no version (F012). info-level →
+  // kind='message' on ingest → never grouped into an issue or counted as error.
+  const g = globalThis as any;
+  if (!g.__upmetricsInitSent) {
+    g.__upmetricsInitSent = true;
+    captureMessage('upmetrics: sdk initialised', 'info');
+  }
 }
 
 export function setUser(user: Record<string, unknown> | undefined): void {
