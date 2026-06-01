@@ -6,6 +6,13 @@ import * as schema from './schema';
 export function createDb(path: string = process.env.DATABASE_PATH ?? './local.db') {
   const sqlite = new Database(path);
   sqlite.exec('PRAGMA journal_mode = WAL;');
+  // Wait up to 5s for a lock to clear instead of throwing "database is locked"
+  // immediately — absorbs transient contention from WAL checkpoints + the
+  // Litestream replicator + the boot migration connection.
+  sqlite.exec('PRAGMA busy_timeout = 5000;');
+  // Safe + faster with WAL (durable via the WAL + Litestream); shorter commit
+  // fsyncs → shorter lock windows → less contention.
+  sqlite.exec('PRAGMA synchronous = NORMAL;');
   sqlite.exec('PRAGMA foreign_keys = ON;');
   return drizzle(sqlite, { schema });
 }
