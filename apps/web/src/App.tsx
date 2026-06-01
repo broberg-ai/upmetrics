@@ -1,15 +1,20 @@
-import { Router, Route } from 'preact-iso';
+import { Router, Route, lazy, ErrorBoundary } from 'preact-iso';
 import { useSession } from './lib/auth';
 import { Spinner } from './components/ui/controls';
 import { Layout } from './components/Layout';
 import { Login } from './routes/Login';
-import { Overview } from './routes/Overview';
-import { ProjectDetail } from './routes/ProjectDetail';
-import { Issues } from './routes/Issues';
-import { Agents } from './routes/Agents';
-import { Probes } from './routes/Probes';
-import { Incidents } from './routes/Incidents';
-import { Remediation } from './routes/Remediation';
+
+// Route-level code-splitting (F011.4): each route is its own chunk, loaded on
+// navigation, so the initial bundle is just the shell + auth. Keeps the heavy
+// deps (Recharts in Agents/Probes) out of first paint. preact-iso's Router
+// suspends seamlessly while a route chunk loads; ErrorBoundary catches it.
+const Overview = lazy(() => import('./routes/Overview').then((m) => m.Overview));
+const ProjectDetail = lazy(() => import('./routes/ProjectDetail').then((m) => m.ProjectDetail));
+const Issues = lazy(() => import('./routes/Issues').then((m) => m.Issues));
+const Agents = lazy(() => import('./routes/Agents').then((m) => m.Agents));
+const Probes = lazy(() => import('./routes/Probes').then((m) => m.Probes));
+const Incidents = lazy(() => import('./routes/Incidents').then((m) => m.Incidents));
+const Remediation = lazy(() => import('./routes/Remediation').then((m) => m.Remediation));
 
 export function App() {
   const { loading, user } = useSession();
@@ -26,16 +31,18 @@ export function App() {
 
   return (
     <Layout user={user}>
-      <Router>
-        <Route path="/" component={Overview} />
-        <Route path="/projects/:id" component={ProjectDetail} />
-        <Route path="/issues" component={Issues} />
-        <Route path="/agents" component={Agents} />
-        <Route path="/probes" component={Probes} />
-        <Route path="/incidents" component={Incidents} />
-        <Route path="/remediation" component={Remediation} />
-        <Route default component={Overview} />
-      </Router>
+      <ErrorBoundary>
+        <Router>
+          <Route path="/" component={Overview} />
+          <Route path="/projects/:id" component={ProjectDetail} />
+          <Route path="/issues" component={Issues} />
+          <Route path="/agents" component={Agents} />
+          <Route path="/probes" component={Probes} />
+          <Route path="/incidents" component={Incidents} />
+          <Route path="/remediation" component={Remediation} />
+          <Route default component={Overview} />
+        </Router>
+      </ErrorBoundary>
     </Layout>
   );
 }
