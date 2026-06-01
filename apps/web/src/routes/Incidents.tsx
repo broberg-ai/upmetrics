@@ -62,7 +62,23 @@ export function Incidents() {
       ) : !list.data || list.data.incidents.length === 0 ? (
         <Empty msg="No incidents match." />
       ) : (
-        <Card class="overflow-x-auto p-0">
+        <>
+          {/* mobile: stacked cards */}
+          <div class="space-y-2 sm:hidden">
+            {list.data.incidents.map((i) => (
+              <Card key={i.id} onClick={() => setSel(i.id)} class="cursor-pointer overflow-hidden active:scale-[0.99]">
+                <div class="break-words font-medium">{i.title}</div>
+                <div class="mt-1.5 flex flex-wrap items-center gap-2 text-xs">
+                  <Badge tone={SEV_TONE[i.severity] ?? 'muted'}>{i.severity}</Badge>
+                  <Badge tone={STATUS_TONE[i.status] ?? 'muted'}>{i.status}</Badge>
+                  <span class="text-[var(--muted)]">{i.kind}</span>
+                  <span class="ml-auto text-[var(--muted)]">{fmtRel(i.openedAt)}</span>
+                </div>
+              </Card>
+            ))}
+          </div>
+          {/* desktop: table */}
+          <Card class="hidden overflow-x-auto p-0 sm:block">
           <table class="w-full text-sm">
             <thead class="text-left text-xs text-[var(--muted)]">
               <tr>
@@ -89,7 +105,8 @@ export function Incidents() {
               ))}
             </tbody>
           </table>
-        </Card>
+          </Card>
+        </>
       )}
       {sel && <IncidentDetail id={sel} onClose={() => setSel(null)} onChanged={() => list.reload()} />}
     </div>

@@ -75,7 +75,23 @@ export function Remediation() {
             {data.history.length === 0 ? (
               <div class="px-4 pb-4"><Empty msg="No remediations yet." /></div>
             ) : (
-              <table class="w-full text-sm">
+              <>
+                {/* mobile: stacked cards */}
+                <div class="space-y-2 px-4 pb-4 sm:hidden">
+                  {data.history.map((h) => (
+                    <div key={h.incident_id} class="rounded-lg border p-3" style={{ borderColor: 'var(--border)' }}>
+                      <div class="break-words text-sm font-medium">{h.title}</div>
+                      <div class="mt-1.5 flex flex-wrap items-center gap-2 text-xs">
+                        <Badge tone={SEV_TONE[h.severity] ?? 'muted'}>{h.severity}</Badge>
+                        <Badge tone={h.manual ? 'primary' : 'muted'}>{h.manual ? 'manual' : 'auto'}</Badge>
+                        <span class="text-[var(--muted)]">{h.project_name}</span>
+                        {h.relay_session ? <Badge tone="ok">{h.relay_session}</Badge> : <span class="text-[var(--muted)]">awaiting</span>}
+                        <span class="ml-auto text-[var(--muted)]">{fmtRel(h.claimed_at ?? h.requested_at ?? h.opened_at)}</span>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+                <table class="hidden w-full text-sm sm:table">
                 <thead class="text-left text-xs text-[var(--muted)]">
                   <tr>
                     <th class="px-4 py-2 font-medium">Issue</th>
@@ -103,7 +119,8 @@ export function Remediation() {
                     </tr>
                   ))}
                 </tbody>
-              </table>
+                </table>
+              </>
             )}
           </Card>
         </div>

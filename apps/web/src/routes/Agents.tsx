@@ -173,7 +173,26 @@ export function Agents() {
         ) : !list.data || list.data.runs.length === 0 ? (
           <Empty msg="No agent runs match." />
         ) : (
-          <Card class="overflow-x-auto p-0">
+          <>
+            {/* mobile: stacked cards */}
+            <div class="space-y-2 sm:hidden">
+              {list.data.runs.map((r) => (
+                <Card key={r.id} onClick={() => setSelRun(r.id)} class="cursor-pointer active:scale-[0.99]">
+                  <div class="flex items-center justify-between gap-2">
+                    <span class="break-words font-medium">{r.agentName}</span>
+                    <Badge tone={statusTone(r.status)}>{r.status}</Badge>
+                  </div>
+                  <div class="mt-1.5 flex flex-wrap items-center gap-2 text-xs text-[var(--muted)]">
+                    <span>{r.model}</span>
+                    <span>{ms(r.durationMs)}</span>
+                    <span>{usd(r.costUsd)}</span>
+                    <span class="ml-auto">{fmtRel(r.startedAt)}</span>
+                  </div>
+                </Card>
+              ))}
+            </div>
+            {/* desktop: table */}
+            <Card class="hidden overflow-x-auto p-0 sm:block">
             <table class="w-full text-sm">
               <thead class="text-left text-xs text-[var(--muted)]">
                 <tr>
@@ -200,7 +219,8 @@ export function Agents() {
                 ))}
               </tbody>
             </table>
-          </Card>
+            </Card>
+          </>
         )}
       </div>
 
