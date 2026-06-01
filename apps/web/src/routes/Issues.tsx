@@ -94,7 +94,25 @@ export function Issues() {
       ) : !list.data || list.data.issues.length === 0 ? (
         <Empty msg="No issues match." />
       ) : (
-        <Card class="overflow-x-auto p-0">
+        <>
+          {/* mobile: stacked cards */}
+          <div class="space-y-2 sm:hidden">
+            {list.data.issues.map((i) => (
+              <Card key={i.id} onClick={() => setSel(i.id)} class="cursor-pointer overflow-hidden active:scale-[0.99]">
+                <div class="break-words font-medium">{i.title}</div>
+                {i.culprit && <div class="mb-2 break-all text-xs text-[var(--muted)]">{i.culprit}</div>}
+                <div class="mt-1 flex flex-wrap items-center gap-2 text-xs">
+                  <Badge tone="muted">{projName.get(i.projectId) ?? i.projectId}</Badge>
+                  <Badge tone={LEVEL_TONE[i.level] ?? 'muted'}>{i.level}</Badge>
+                  <Badge tone={STATUS_TONE[i.status] ?? 'muted'}>{i.status}</Badge>
+                  <span class="text-[var(--muted)]">{i.eventCount} events</span>
+                  <span class="ml-auto text-[var(--muted)]">{fmtRel(i.lastSeen)}</span>
+                </div>
+              </Card>
+            ))}
+          </div>
+          {/* desktop: table */}
+          <Card class="hidden overflow-x-auto p-0 sm:block">
           <table class="w-full text-sm">
             <thead class="text-left text-xs text-[var(--muted)]">
               <tr>
@@ -133,7 +151,8 @@ export function Issues() {
               ))}
             </tbody>
           </table>
-        </Card>
+          </Card>
+        </>
       )}
 
       {sel && <IssueDetail id={sel} onClose={() => setSel(null)} onChanged={() => list.reload()} />}

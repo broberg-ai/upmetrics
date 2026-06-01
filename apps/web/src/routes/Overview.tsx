@@ -85,8 +85,8 @@ export function Overview() {
             ))}
           </div>
 
-          {/* global matrix */}
-          <Card class="overflow-x-auto">
+          {/* global matrix — desktop only; the stacked project cards above cover it on mobile */}
+          <Card class="hidden overflow-x-auto sm:block">
             <div class="mb-3 text-sm font-medium">Global matrix</div>
             <table class="w-full text-sm">
               <thead class="text-left text-xs text-[var(--muted)]">
