@@ -43,6 +43,13 @@
       "when": 1780309736606,
       "tag": "0005_yummy_captain_cross",
       "breakpoints": true
+    },
+    {
+      "idx": 6,
+      "version": "6",
+      "when": 1780395514271,
+      "tag": "0006_tricky_quasar",
+      "breakpoints": true
     }
   ]
 }
