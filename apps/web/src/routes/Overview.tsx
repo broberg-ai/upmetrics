@@ -1,4 +1,5 @@
 import { useApi } from '../lib/useApi';
+import { usd } from '../lib/format';
 import { Card, Badge, StatusDot } from '../components/ui/controls';
 import { Loading, ErrorBox, Empty, PageHeader } from '../components/PageState';
 
@@ -17,15 +18,6 @@ interface Proj {
 interface OverviewData {
   projects: Proj[];
   totals: { projects: number; open_issues: number; open_incidents: number; agent_cost_today: number; agent_cost_total: number };
-}
-
-// USD with precision that suits tiny per-call costs ($0.0074) up to fleet totals.
-function fmtUsd(n: number): string {
-  if (!n) return '$0';
-  if (n < 0.01) return `$${n.toFixed(4)}`;
-  if (n < 1) return `$${n.toFixed(3)}`;
-  if (n < 1000) return `$${n.toFixed(2)}`;
-  return `$${Math.round(n).toLocaleString('en-US')}`;
 }
 
 const TONE = { ok: 'ok', degraded: 'warn', down: 'down' } as const;
@@ -68,8 +60,8 @@ export function Overview() {
               <Metric label="Open incidents" value={data.totals.open_incidents} tone={data.totals.open_incidents ? 'down' : undefined} />
             </Card>
             <Card>
-              <Metric label="Fleet agent cost" value={fmtUsd(data.totals.agent_cost_total)} />
-              <div class="mt-0.5 text-xs text-[var(--muted)]">{fmtUsd(data.totals.agent_cost_today)} today</div>
+              <Metric label="Fleet agent cost" value={usd(data.totals.agent_cost_total)} />
+              <div class="mt-0.5 text-xs text-[var(--muted)]">{usd(data.totals.agent_cost_today)} today</div>
             </Card>
           </div>
 
@@ -96,7 +88,7 @@ export function Overview() {
                   </div>
                   <div class="mt-3 flex items-center justify-between border-t pt-2 text-xs" style={{ borderColor: 'var(--border)' }}>
                     <span class="text-[var(--muted)]">Agent cost</span>
-                    <span class="font-medium">{fmtUsd(p.agent_cost_total)}</span>
+                    <span class="font-medium">{usd(p.agent_cost_total)}</span>
                   </div>
                 </Card>
               </a>
@@ -129,7 +121,7 @@ export function Overview() {
                     <td class="py-2">{p.probe_up_pct === null ? '—' : `${p.probe_up_pct}%`}</td>
                     <td class="py-2">{p.open_issues}</td>
                     <td class="py-2">{p.open_incidents}</td>
-                    <td class="py-2">{fmtUsd(p.agent_cost_total)}</td>
+                    <td class="py-2">{usd(p.agent_cost_total)}</td>
                   </tr>
                 ))}
               </tbody>

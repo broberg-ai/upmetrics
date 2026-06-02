@@ -17,4 +17,14 @@ export function fmtRel(v: string | number | null | undefined): string {
   return `${Math.round(h / 24)}d ago`;
 }
 
-export const usd = (n: number) => `$${(n ?? 0).toFixed(2)}`;
+// Adaptive USD: per-call AI costs are often sub-cent ($0.0000286), so a flat
+// 2-decimal format collapses them all to "$0.00" (looks like a bug). Show 2 sig
+// figs for sub-cent, more decimals near $1, separators for large fleet totals.
+export function usd(n: number): string {
+  const v = n ?? 0;
+  if (v === 0) return '$0';
+  if (v >= 1000) return `$${Math.round(v).toLocaleString('en-US')}`;
+  if (v >= 1) return `$${v.toFixed(2)}`;
+  if (v >= 0.01) return `$${v.toFixed(3)}`; // 1¢–$1 → e.g. $0.046
+  return `$${v.toPrecision(2).replace(/0+$/, '').replace(/\.$/, '')}`; // sub-cent → $0.000029
+}
