@@ -14,6 +14,15 @@ primary_region = "arn"
   source = "upmetrics_data"
   destination = "/data"
 
+# 256MB ran with ~7MB free (bun + sqlite page-cache + Litestream fill the box),
+# so any spike — a */5 probe burst, a Tigris S3 latency blip — starved memory →
+# event-loop freeze → health-check timeout → user-facing 503. 512MB gives real
+# slack. Single source of truth so a deploy never reverts to the 256MB default.
+# See docs/adr/0001 (2026-06-02 flap postmortem).
+[[vm]]
+  size = "shared-cpu-1x"
+  memory = "512mb"
+
 [http_service]
   internal_port = 8080
   force_https = true
