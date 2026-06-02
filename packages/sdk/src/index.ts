@@ -138,17 +138,44 @@ function send(event: Record<string, unknown>): string | null {
   return event.event_id as string;
 }
 
+// Benign client-side network/chunk failures dominate browser error volume but are
+// almost never bugs: a deploy restart, a user going offline, a navigation that
+// aborts an in-flight fetch, or a stale code-split chunk after a deploy. Capturing
+// each floods the project + trips false error-spikes (cardmem deploy-noise, 2026-06-02).
+// Policy: drop them from AUTO-capture (genuine downtime is caught by uptime probes),
+// keep a breadcrumb for context, and sample at most one per minute as a low-severity
+// warning so a really-broken endpoint (sustained) still trickles in — never as an
+// 'error', so it can't trip an error-spike. Manual captureException() is unaffected.
+const BENIGN_NETWORK_RE =
+  /failed to fetch|load failed|networkerror when attempting to fetch|fetch dynamically imported module|loading chunk \d+ failed|loading css chunk|importing a module script failed/i;
+let lastBenignSentAt = 0;
+function handledAsBenign(x: unknown): boolean {
+  const msg = x instanceof Error ? `${x.name}: ${x.message}` : String(x);
+  if (!BENIGN_NETWORK_RE.test(msg)) return false;
+  addBreadcrumb({ category: 'network', level: 'warning', message: msg });
+  const now = Date.now();
+  if (now - lastBenignSentAt > 60_000) {
+    lastBenignSentAt = now;
+    captureMessage(`client network error (sampled; others suppressed): ${msg}`, 'warning');
+  }
+  return true;
+}
+
 function installAutoInstrument(): void {
   const g = globalThis as any;
 
   // window.onerror + unhandledrejection (browser; node/bun may lack these).
   if (typeof g.addEventListener === 'function') {
     g.addEventListener('error', (e: any) => {
-      if (e?.error) captureException(e.error);
-      else if (e?.message) captureMessage(String(e.message), 'error');
+      if (e?.error) {
+        if (!handledAsBenign(e.error)) captureException(e.error);
+      } else if (e?.message) {
+        if (!handledAsBenign(e.message)) captureMessage(String(e.message), 'error');
+      }
     });
     g.addEventListener('unhandledrejection', (e: any) => {
-      captureException(e?.reason ?? new Error('unhandledrejection'));
+      const reason = e?.reason ?? new Error('unhandledrejection');
+      if (!handledAsBenign(reason)) captureException(reason);
     });
   }
 
@@ -168,7 +195,7 @@ function installAutoInstrument(): void {
         if (!own && res && res.status >= 500) captureMessage(`HTTP ${res.status} on ${url}`, 'warning');
         return res;
       } catch (err) {
-        if (!own) captureException(err);
+        if (!own && !handledAsBenign(err)) captureException(err);
         throw err;
       }
     };
