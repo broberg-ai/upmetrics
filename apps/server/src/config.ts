@@ -55,6 +55,15 @@ export const config = {
   remediationRelayToken: process.env.REMEDIATION_RELAY_TOKEN ?? '',
   remediationRelaySeverity: process.env.REMEDIATION_RELAY_SEVERITY ?? 'high', // min severity to relay
   remediationEscalateMs: int('REMEDIATION_ESCALATE_MS', 1_800_000), // unclaimed > this → escalate to Christian
+  // F005.4 — push error-incidents to cardmem's Inbox as triage cards (PUSH model,
+  // cardmem F067). Disabled when CARDMEM_INCIDENTS_KEY is unset. Each incident is
+  // pushed at most once (incidents.cardmem_pushed_at); cardmem dedups on
+  // fingerprint as a backstop. Scope = the listed upmetrics projects (start:
+  // cardmem itself — "cardmem as remediation target"). The claim_url is HMAC-signed
+  // with REMEDIATION_RELAY_TOKEN so cardmem can claim without holding that token.
+  cardmemIncidentsUrl: process.env.CARDMEM_INCIDENTS_URL ?? 'https://services.cardmem.com/api/incidents',
+  cardmemIncidentsKey: process.env.CARDMEM_INCIDENTS_KEY ?? '',
+  cardmemPushProjects: (process.env.CARDMEM_PUSH_PROJECTS ?? 'cardmem').split(',').filter(Boolean),
 } as const;
 
 // Fail fast in production with a CLEAR error if a required secret is missing or

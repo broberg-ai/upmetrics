@@ -181,6 +181,10 @@ export const incidents = sqliteTable(
     // issue/incident to Buddy from the dashboard; bypasses the auto severity +
     // opt-in gates so a single issue can be relayed on demand.
     relayRequestedAt: integer('relay_requested_at', { mode: 'timestamp_ms' }),
+    // F005.4 — pushed to cardmem's Inbox as a triage card. Set once after a
+    // successful push so each incident becomes at most one card (cardmem also
+    // dedups on fingerprint as a backstop). Null = not yet pushed.
+    cardmemPushedAt: integer('cardmem_pushed_at', { mode: 'timestamp_ms' }),
   },
   (t) => [index('incidents_project_idx').on(t.projectId)],
 );

@@ -7,6 +7,7 @@ import type { Context, Hono } from 'hono';
 import { and, desc, eq, isNull } from 'drizzle-orm';
 import { getDb, schema } from '../db';
 import { config } from '../config';
+import { verifyClaim } from './cardmem-push';
 
 type Db = ReturnType<typeof getDb>;
 const SEVERITY_RANK: Record<string, number> = { low: 1, medium: 2, high: 3, critical: 4 };
@@ -156,10 +157,21 @@ export function registerRemediationRoutes(app: Hono): void {
   });
 
   app.post('/api/remediation/:incidentId/claim', async (c) => {
-    if (!authed(c)) return c.json({ error: 'unauthorized' }, 401);
-    const body = (await c.req.json().catch(() => ({}))) as { session?: string };
-    if (!body.session) return c.json({ error: 'session required' }, 400);
-    const res = claimRemediation(getDb(), c.req.param('incidentId'), body.session);
+    const incidentId = c.req.param('incidentId');
+    // Two auth paths: (a) Bearer relay-token + body.session (Buddy's poll-loop),
+    // or (b) a signed ?t= claim token (cardmem's callback — no token needed). F005.4.
+    const t = c.req.query('t');
+    let session: string;
+    if (t) {
+      if (!verifyClaim(incidentId, t)) return c.json({ error: 'invalid_claim_token' }, 401);
+      session = 'cardmem';
+    } else {
+      if (!authed(c)) return c.json({ error: 'unauthorized' }, 401);
+      const body = (await c.req.json().catch(() => ({}))) as { session?: string };
+      if (!body.session) return c.json({ error: 'session required' }, 400);
+      session = body.session;
+    }
+    const res = claimRemediation(getDb(), incidentId, session);
     if (!res.ok) return c.json({ error: 'unknown_incident' }, 404);
     return c.json({ ok: true, already_claimed: res.alreadyClaimed });
   });

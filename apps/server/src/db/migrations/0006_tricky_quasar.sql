@@ -1,0 +1,1 @@
+ALTER TABLE `incidents` ADD `cardmem_pushed_at` integer;
