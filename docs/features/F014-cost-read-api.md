@@ -91,3 +91,36 @@ round per row. (Future hardening noted below.)
   `agent_runs.cost_micro_usd` integer column at ingest and sum that instead of REAL.
 - This is the most likely first trigger to revisit the storage-HA ADR ([0001](../adr/0001-storage-ha.md))
   — it is read-heavy; design so reads could later be served from a replica unchanged.
+
+## Cross-check contract — trail's `CostSummary` (intercom #2416)
+
+trail will **review our `/api/cost/summary` JSON shape and green-light it before we
+freeze it** (F014.1). Their live `CostSummary` (consumed by trail's Cost panel today,
+`apps/server/src/services/cost-aggregator.ts`) for reference + cross-check:
+
+```ts
+interface CostSummary {
+  windowDays: number;
+  totalCents: number;            // USD cents, INTEGER (not micro-USD)
+  totalEstimatedCents: number;   // shadow estimate for pre-tracking jobs
+  jobCount: number;              // completed jobs in window (excl failed/running)
+  byDay: Array<{ date: string; cents: number; jobs: number; estimatedCents: number | null }>;
+  bySource: Array<{ documentId: string; filename: string; title: string | null; cents: number; jobCount: number }>;
+  avgCentsPerNeuron: number;     // trail-specific; our equivalent ≈ cost per agent_run
+  includeShadow: boolean;
+}
+```
+
+Cross-check + mapping notes from trail:
+- **Units differ:** theirs is integer USD **cents**, ours is **micro-USD**. Cross-check:
+  `our_micro_usd / 10_000 ≈ their_cents`. Ours will read **slightly higher/finer** —
+  they lose sub-cent on `Math.round(usd*100)`; we keep full precision (pitfall #3 in
+  practice — our per-call model is more accurate than their per-job cents).
+- **`metered:false` ↔ their Max-Plan $0 jobs** (`backend='claude-cli'`, `total_cost_usd=0`).
+- Their `backend` (`claude-cli|openrouter`) ↔ our `provider`/`transport`.
+- Their `model_trail[]` (fallback chain) is finer than a single model; if we ever expose
+  model **per call** they could reconstruct chain-cost — not a requirement.
+- `avgCentsPerNeuron` is trail-specific; do NOT replicate.
+
+When F014.1 takes shape: send trail the proposed summary JSON → they cross-check vs the
+above → green-light → freeze.
