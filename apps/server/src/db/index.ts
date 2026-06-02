@@ -13,6 +13,16 @@ export function createDb(path: string = process.env.DATABASE_PATH ?? './local.db
   // Safe + faster with WAL (durable via the WAL + Litestream); shorter commit
   // fsyncs → shorter lock windows → less contention.
   sqlite.exec('PRAGMA synchronous = NORMAL;');
+  // Hand WAL checkpointing to Litestream; the app NEVER runs an inline
+  // checkpoint. bun:sqlite is synchronous on a single event loop, so a
+  // writer-triggered checkpoint that stalls on slow disk / a backed-up
+  // Litestream→S3 sync freezes EVERY request (incl. /health) → fly drops the
+  // instance from tcp/443 → flapping outage (2026-06-02; see docs/adr/0001).
+  // With autocheckpoint off, app writes only append to the WAL (fast) and stay
+  // responsive even while Litestream is catching up to slow Tigris; durability
+  // degrades gracefully (WAL grows, RPO rises) instead of the event loop
+  // freezing. Litestream owns checkpoint + truncation on its own schedule.
+  sqlite.exec('PRAGMA wal_autocheckpoint = 0;');
   sqlite.exec('PRAGMA foreign_keys = ON;');
   return drizzle(sqlite, { schema });
 }

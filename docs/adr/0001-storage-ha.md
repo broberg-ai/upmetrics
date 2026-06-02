@@ -49,3 +49,13 @@ Until a trigger fires: keep single-node, keep `fly scale count 1` (the split-bra
 - No code change now. F008.5 (multi-region runtime) stays **blocked on this ADR** and should NOT be picked up — multi-region with the current named-volume-per-machine setup is precisely the split-brain trap; it requires Option B (LiteFS) first.
 - The cost-read API (new work, modelled from trail's needs) is a **read-heavy** addition — it's the most likely first trigger for revisiting (#2). Design it so reads could later be served from a replica without API changes.
 - This ADR is the durable record so future sessions don't re-litigate "why aren't we on Turso/multi-region."
+
+## Addendum 2026-06-02 — single-node flap-hardening (shipped, F008.7)
+
+A real incident validated the "stay single-node" choice but exposed a fragility: a backed-up Litestream→Tigris sync + a writer-triggered inline WAL checkpoint stalled the **synchronous** `bun:sqlite` write for 50–78s, freezing the single event loop so even DB-free `/health` couldn't answer within the 2s check timeout → fly dropped the only instance from tcp/443 → ~12-min flapping outage. `fly machine restart` recovered it (fresh Litestream connection; WAL writes back <1s).
+
+Since the ADR keeps us single-node, we **harden** single-node instead of adding HA:
+1. **`PRAGMA wal_autocheckpoint = 0`** (`db/index.ts`) — Litestream owns checkpointing; app writes only append to the WAL and never run a long inline checkpoint on the request path. A slow Tigris now degrades durability gracefully (WAL grows, RPO rises) instead of freezing the event loop.
+2. **Tolerant health check** (`fly.toml`: timeout 2s→5s, grace 10s→30s) — a brief stall no longer drops the single instance from tcp/443.
+
+This does not change the HA recommendation; it makes the recommended posture robust to the failure mode we actually hit. The deeper fragility (sync `bun:sqlite` on the event loop) is only fully removed by moving HA (LiteFS) or off-thread sqlite — still gated by the revisit triggers above.
