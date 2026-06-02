@@ -1,0 +1,151 @@
+// F014 — Cost read-API. Project-scoped read surface over agent_runs so each
+// enrolled app can show its OWN accumulated LLM/agent cost in its own UI.
+// Auth: header X-Upmetrics-Key = the project's api_key (same per-project key as
+// ingest; reused read-side for v1). Money is ALWAYS integer micro-USD ($1 =
+// 1_000_000): SUM(cost_usd) in full REAL precision, round ONCE at the boundary
+// (trail pitfall #3). USD is source-of-truth — clients do their own FX.
+// metered: a run is "free" when transport=subprocess OR cost_usd=0 (Max-Plan).
+import type { Context, Hono } from 'hono';
+import { eq, sql } from 'drizzle-orm';
+import { getDb, schema } from '../db';
+
+type Db = ReturnType<typeof getDb>;
+
+const WINDOW_MS: Record<string, number> = { day: 86_400_000, week: 604_800_000, month: 2_592_000_000 };
+const MICRO = 1_000_000;
+const microUsd = (usd: unknown): number => Math.round(Number(usd ?? 0) * MICRO);
+
+function projectFromKey(c: Context) {
+  const key = c.req.header('x-upmetrics-key');
+  if (!key) return null;
+  return getDb().select().from(schema.projects).where(eq(schema.projects.apiKey, key)).get() ?? null;
+}
+
+// epoch-ms from an ISO-8601 string or an epoch-ms number string; undefined if unparseable.
+function parseTime(raw: string | undefined): number | undefined {
+  if (!raw) return undefined;
+  if (/^\d+$/.test(raw)) return Number(raw);
+  const t = Date.parse(raw);
+  return Number.isNaN(t) ? undefined : t;
+}
+
+function resolveWindow(q: Record<string, string | undefined>, now: number) {
+  const toMs = parseTime(q.to) ?? now;
+  const fromExplicit = parseTime(q.from);
+  const span = WINDOW_MS[q.window ?? 'week'] ?? 604_800_000; // default 7d
+  const fromMs = fromExplicit ?? toMs - span;
+  return { fromMs, toMs };
+}
+
+// Composable WHERE: project + window + optional filters. transport lives in the
+// tags JSON, so it's matched via json_extract.
+function buildWhere(projectId: string, fromMs: number, toMs: number, q: Record<string, string | undefined>) {
+  const parts = [
+    sql`project_id = ${projectId}`,
+    sql`started_at >= ${fromMs}`,
+    sql`started_at < ${toMs}`,
+  ];
+  if (q.provider) parts.push(sql`provider = ${q.provider}`);
+  if (q.model) parts.push(sql`model = ${q.model}`);
+  if (q.tier) parts.push(sql`tier = ${q.tier}`);
+  if (q.agent_name) parts.push(sql`agent_name = ${q.agent_name}`);
+  if (q.transport) parts.push(sql`json_extract(tags, '$.transport') = ${q.transport}`);
+  return sql.join(parts, sql` AND `);
+}
+
+interface BreakdownRow { key: string; run_count: number; cost_usd: number; input_tokens: number; output_tokens: number }
+const FREE = sql`(json_extract(tags, '$.transport') = 'subprocess' OR cost_usd = 0)`;
+
+function breakdown(db: Db, where: ReturnType<typeof buildWhere>, keyExpr: ReturnType<typeof sql>) {
+  const rows = db.all(sql`
+    SELECT ${keyExpr} AS key, COUNT(*) AS run_count,
+      COALESCE(SUM(cost_usd), 0) AS cost_usd,
+      COALESCE(SUM(input_tokens), 0) AS input_tokens,
+      COALESCE(SUM(output_tokens), 0) AS output_tokens
+    FROM agent_runs WHERE ${where} GROUP BY ${keyExpr} ORDER BY cost_usd DESC
+  `) as BreakdownRow[];
+  return rows.map((r) => ({
+    key: r.key,
+    micro_usd: microUsd(r.cost_usd),
+    input_tokens: Number(r.input_tokens),
+    output_tokens: Number(r.output_tokens),
+    run_count: Number(r.run_count),
+  }));
+}
+
+export function costSummary(db: Db, projectId: string, q: Record<string, string | undefined>, now: number) {
+  const { fromMs, toMs } = resolveWindow(q, now);
+  const where = buildWhere(projectId, fromMs, toMs, q);
+  // db.all(raw sql) yields keyed-object rows in drizzle-bun-sqlite (db.get yields
+  // a positional array for raw SQL) — use all()[0] for a single keyed row.
+  const t = (db.all(sql`
+    SELECT
+      COUNT(*) AS run_count,
+      COALESCE(SUM(input_tokens), 0) AS input_tokens,
+      COALESCE(SUM(output_tokens), 0) AS output_tokens,
+      COALESCE(SUM(cache_read_tokens), 0) AS cache_read_tokens,
+      COALESCE(SUM(cache_creation_tokens), 0) AS cache_creation_tokens,
+      COALESCE(SUM(cost_usd), 0) AS cost_usd,
+      COALESCE(SUM(CASE WHEN ${FREE} THEN 0 ELSE cost_usd END), 0) AS metered_cost_usd,
+      COALESCE(SUM(CASE WHEN ${FREE} THEN 1 ELSE 0 END), 0) AS free_run_count
+    FROM agent_runs WHERE ${where}
+  `) as Record<string, number>[])[0] ?? {};
+  return {
+    generated_at: new Date(now).toISOString(),
+    window: { from: new Date(fromMs).toISOString(), to: new Date(toMs).toISOString() },
+    total_micro_usd: microUsd(t.cost_usd),
+    input_tokens: Number(t.input_tokens),
+    output_tokens: Number(t.output_tokens),
+    cache_read_tokens: Number(t.cache_read_tokens),
+    cache_creation_tokens: Number(t.cache_creation_tokens),
+    run_count: Number(t.run_count),
+    metered: { metered_micro_usd: microUsd(t.metered_cost_usd), free_run_count: Number(t.free_run_count) },
+    by_provider: breakdown(db, where, sql`provider`),
+    by_model: breakdown(db, where, sql`model`),
+    by_tier: breakdown(db, where, sql`COALESCE(tier, '(none)')`),
+    by_capability: breakdown(db, where, sql`COALESCE(json_extract(tags, '$.capability'), '(none)')`),
+  };
+}
+
+export function costTimeseries(db: Db, projectId: string, q: Record<string, string | undefined>, now: number) {
+  const { fromMs, toMs } = resolveWindow(q, now);
+  const where = buildWhere(projectId, fromMs, toMs, q);
+  const bucket = q.bucket === 'hour' ? 'hour' : 'day';
+  // started_at is epoch-ms; strftime works on seconds. GROUP BY only emits
+  // buckets that have rows → non-zero buckets only (clients pad zeros).
+  const fmt = bucket === 'hour' ? '%Y-%m-%dT%H:00:00Z' : '%Y-%m-%dT00:00:00Z';
+  const points = db.all(sql`
+    SELECT strftime(${fmt}, started_at / 1000, 'unixepoch') AS ts,
+      COUNT(*) AS run_count,
+      COALESCE(SUM(cost_usd), 0) AS cost_usd,
+      COALESCE(SUM(input_tokens), 0) AS input_tokens,
+      COALESCE(SUM(output_tokens), 0) AS output_tokens
+    FROM agent_runs WHERE ${where} GROUP BY ts ORDER BY ts ASC
+  `) as Array<{ ts: string; run_count: number; cost_usd: number; input_tokens: number; output_tokens: number }>;
+  return {
+    generated_at: new Date(now).toISOString(),
+    bucket,
+    window: { from: new Date(fromMs).toISOString(), to: new Date(toMs).toISOString() },
+    points: points.map((p) => ({
+      ts: p.ts,
+      micro_usd: microUsd(p.cost_usd),
+      input_tokens: Number(p.input_tokens),
+      output_tokens: Number(p.output_tokens),
+      run_count: Number(p.run_count),
+    })),
+  };
+}
+
+export function registerCostRoutes(app: Hono): void {
+  app.get('/api/cost/summary', (c) => {
+    const project = projectFromKey(c);
+    if (!project) return c.json({ error: 'invalid_api_key' }, 401);
+    return c.json(costSummary(getDb(), project.id, c.req.query(), Date.now()));
+  });
+
+  app.get('/api/cost/timeseries', (c) => {
+    const project = projectFromKey(c);
+    if (!project) return c.json({ error: 'invalid_api_key' }, 401);
+    return c.json(costTimeseries(getDb(), project.id, c.req.query(), Date.now()));
+  });
+}

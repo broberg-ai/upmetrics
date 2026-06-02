@@ -8,6 +8,7 @@ import { registerAgentRoutes } from './ingest/agent';
 import { registerProbeRoutes } from './probes/routes';
 import { registerIncidentRoutes } from './incidents/routes';
 import { registerDashboardRoutes } from './dashboard/routes';
+import { registerCostRoutes } from './cost/routes';
 import { registerRemediationRoutes } from './incidents/relay';
 import { captureSelf } from './dogfood';
 
@@ -19,6 +20,7 @@ export function createApp() {
   registerProbeRoutes(app);
   registerIncidentRoutes(app);
   registerDashboardRoutes(app);
+  registerCostRoutes(app); // F014 — per-project cost read-API
   registerRemediationRoutes(app); // F010 — auto-remediation pull-feed
 
   app.get('/health', (c) =>
