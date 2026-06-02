@@ -47,6 +47,14 @@ export function registerDashboardRoutes(app: Hono): void {
           .from(schema.agentRuns)
           .where(and(eq(schema.agentRuns.projectId, p.id), gte(schema.agentRuns.startedAt, today)))
           .get()?.s ?? 0;
+      // All-time cumulative agent cost — the meaningful per-project + fleet "total"
+      // (today resets at midnight). Cheap SUM over the indexed project_id.
+      const agentCostTotal =
+        db
+          .select({ s: sql<number>`coalesce(sum(cost_usd),0)` })
+          .from(schema.agentRuns)
+          .where(eq(schema.agentRuns.projectId, p.id))
+          .get()?.s ?? 0;
 
       const status = down > 0 || openIncidents > 0 ? 'down' : openIssues > 0 ? 'degraded' : 'ok';
       return {
@@ -58,6 +66,7 @@ export function registerDashboardRoutes(app: Hono): void {
         open_issues: openIssues,
         open_incidents: openIncidents,
         agent_cost_today: Number(agentCostToday),
+        agent_cost_total: Number(agentCostTotal),
         status,
       };
     });
@@ -69,6 +78,7 @@ export function registerDashboardRoutes(app: Hono): void {
         open_issues: rows.reduce((a, r) => a + r.open_issues, 0),
         open_incidents: rows.reduce((a, r) => a + r.open_incidents, 0),
         agent_cost_today: rows.reduce((a, r) => a + r.agent_cost_today, 0),
+        agent_cost_total: rows.reduce((a, r) => a + r.agent_cost_total, 0),
       },
     });
   });

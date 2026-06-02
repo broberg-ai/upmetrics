@@ -11,11 +11,21 @@ interface Proj {
   open_issues: number;
   open_incidents: number;
   agent_cost_today: number;
+  agent_cost_total: number;
   status: 'ok' | 'degraded' | 'down';
 }
 interface OverviewData {
   projects: Proj[];
-  totals: { projects: number; open_issues: number; open_incidents: number; agent_cost_today: number };
+  totals: { projects: number; open_issues: number; open_incidents: number; agent_cost_today: number; agent_cost_total: number };
+}
+
+// USD with precision that suits tiny per-call costs ($0.0074) up to fleet totals.
+function fmtUsd(n: number): string {
+  if (!n) return '$0';
+  if (n < 0.01) return `$${n.toFixed(4)}`;
+  if (n < 1) return `$${n.toFixed(3)}`;
+  if (n < 1000) return `$${n.toFixed(2)}`;
+  return `$${Math.round(n).toLocaleString('en-US')}`;
 }
 
 const TONE = { ok: 'ok', degraded: 'warn', down: 'down' } as const;
@@ -47,7 +57,7 @@ export function Overview() {
       ) : (
         <div class="space-y-6">
           {/* totals strip */}
-          <div class="grid grid-cols-3 gap-3">
+          <div class="grid grid-cols-2 gap-3 lg:grid-cols-4">
             <Card>
               <Metric label="Projects" value={data.totals.projects} />
             </Card>
@@ -56,6 +66,10 @@ export function Overview() {
             </Card>
             <Card>
               <Metric label="Open incidents" value={data.totals.open_incidents} tone={data.totals.open_incidents ? 'down' : undefined} />
+            </Card>
+            <Card>
+              <Metric label="Fleet agent cost" value={fmtUsd(data.totals.agent_cost_total)} />
+              <div class="mt-0.5 text-xs text-[var(--muted)]">{fmtUsd(data.totals.agent_cost_today)} today</div>
             </Card>
           </div>
 
@@ -80,6 +94,10 @@ export function Overview() {
                     <Metric label="Open issues" value={p.open_issues} tone={p.open_issues ? 'warn' : undefined} />
                     <Metric label="Incidents" value={p.open_incidents} tone={p.open_incidents ? 'down' : undefined} />
                   </div>
+                  <div class="mt-3 flex items-center justify-between border-t pt-2 text-xs" style={{ borderColor: 'var(--border)' }}>
+                    <span class="text-[var(--muted)]">Agent cost</span>
+                    <span class="font-medium">{fmtUsd(p.agent_cost_total)}</span>
+                  </div>
                 </Card>
               </a>
             ))}
@@ -96,6 +114,7 @@ export function Overview() {
                   <th class="pb-2 font-medium">Probes</th>
                   <th class="pb-2 font-medium">Issues</th>
                   <th class="pb-2 font-medium">Incidents</th>
+                  <th class="pb-2 font-medium">Agent cost</th>
                 </tr>
               </thead>
               <tbody>
@@ -110,6 +129,7 @@ export function Overview() {
                     <td class="py-2">{p.probe_up_pct === null ? '—' : `${p.probe_up_pct}%`}</td>
                     <td class="py-2">{p.open_issues}</td>
                     <td class="py-2">{p.open_incidents}</td>
+                    <td class="py-2">{fmtUsd(p.agent_cost_total)}</td>
                   </tr>
                 ))}
               </tbody>
