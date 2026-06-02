@@ -3,13 +3,13 @@
   "base_url": "https://upmetrics.org",
   "auth": { "adapter": "storageState", "statePath": ".lens/storage-state.json" },
   "surfaces": [
-    { "name": "overview", "path": "/", "mode": "element", "selector": "[data-testid=\"overview-root\"]", "waitFor": "[data-testid=\"overview-root\"]" },
-    { "name": "issues", "path": "/issues", "mode": "element", "selector": "[data-testid=\"issues-root\"]", "waitFor": "[data-testid=\"issues-root\"]" },
-    { "name": "agents", "path": "/agents", "mode": "element", "selector": "[data-testid=\"agents-root\"]", "waitFor": "[data-testid=\"agents-root\"]" },
-    { "name": "probes", "path": "/probes", "mode": "element", "selector": "[data-testid=\"probes-root\"]", "waitFor": "[data-testid=\"probes-root\"]" },
-    { "name": "incidents", "path": "/incidents", "mode": "element", "selector": "[data-testid=\"incidents-root\"]", "waitFor": "[data-testid=\"incidents-root\"]" },
-    { "name": "remediation", "path": "/remediation", "mode": "element", "selector": "[data-testid=\"remediation-root\"]", "waitFor": "[data-testid=\"remediation-root\"]" },
-    { "name": "project-detail", "path": "/projects/upmetrics", "mode": "element", "selector": "[data-testid=\"project-detail-root\"]", "waitFor": "[data-testid=\"project-detail-root\"]", "assert": "const t=document.querySelector('[data-testid=\"project-detail-root\"]').innerText; return { pass: /sdk\\s*0\\.1\\.4/.test(t), detail: (t.match(/upmetrics-server[^\\n]*/)||[''])[0] }" }
+    { "name": "overview", "path": "/", "mode": "element", "selector": "[data-testid=\"overview-root\"]", "waitFor": "[data-testid=\"overview-root\"]", "no_diff": true, "assert": "return { pass: document.querySelector('[data-testid=\"overview-root\"]').innerText.includes('Health across all projects') }" },
+    { "name": "issues", "path": "/issues", "mode": "element", "selector": "[data-testid=\"issues-root\"]", "waitFor": "[data-testid=\"issues-root\"]", "no_diff": true },
+    { "name": "agents", "path": "/agents", "mode": "element", "selector": "[data-testid=\"agents-root\"]", "waitFor": "[data-testid=\"agents-root\"]", "no_diff": true },
+    { "name": "probes", "path": "/probes", "mode": "element", "selector": "[data-testid=\"probes-root\"]", "waitFor": "[data-testid=\"probes-root\"]", "no_diff": true },
+    { "name": "incidents", "path": "/incidents", "mode": "element", "selector": "[data-testid=\"incidents-root\"]", "waitFor": "[data-testid=\"incidents-root\"]", "no_diff": true },
+    { "name": "remediation", "path": "/remediation", "mode": "element", "selector": "[data-testid=\"remediation-root\"]", "waitFor": "[data-testid=\"remediation-root\"]", "no_diff": true },
+    { "name": "project-detail", "path": "/projects/upmetrics", "mode": "element", "selector": "[data-testid=\"project-detail-root\"]", "waitFor": "[data-testid=\"project-detail-root\"]", "no_diff": true, "assert": "const t=document.querySelector('[data-testid=\"project-detail-root\"]').innerText; return { pass: /sdk\\s*0\\.1\\.4/.test(t), detail: (t.match(/upmetrics-server[^\\n]*/)||[''])[0] }" }
   ],
   "flows": [
     {
