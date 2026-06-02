@@ -32,7 +32,8 @@ Totals + breakdowns for a window.
 
 Query params (all optional): `window=day|week|month` (default `week`), or explicit
 `from` / `to` (ISO-8601 or epoch-ms; override `window`). Filters: `provider`, `model`,
-`tier`, `agent_name`, `transport` (`http|subprocess`).
+`tier`, `agent_name`, `transport` (`http|subprocess`), and any **`tag.<key>=<value>`**
+(matches the `tags` JSON — e.g. `tag.tenantId=sanne` for per-tenant cost).
 
 ```jsonc
 // GET /api/cost/summary?window=week
@@ -55,6 +56,31 @@ Query params (all optional): `window=day|week|month` (default `week`), or explic
 
 Each breakdown row is `{ key, micro_usd, input_tokens, output_tokens, run_count }`,
 ordered by cost desc. `tier`/`capability` fall back to `"(none)"` when absent.
+
+### Group by a tag (`?groupBy=<key>`)
+
+Add `groupBy=<tagKey>` to get cost broken down per distinct tag value — the
+per-tenant view. `@broberg/ai-sdk` merges consumer `labels` (`tenantId`, `kbId`, …)
+into `tags`, so one project key serves cost per tenant **without** a key per tenant.
+
+```jsonc
+// GET /api/cost/summary?groupBy=tenantId&window=month
+{
+  "...": "all the usual summary fields, PLUS:",
+  "group_by": "tenantId",
+  "by_group": [
+    { "key": "bob",   "micro_usd": 40000, "input_tokens": 0, "output_tokens": 0, "run_count": 1 },
+    { "key": "sanne", "micro_usd": 30000, "input_tokens": 0, "output_tokens": 0, "run_count": 2 }
+  ]
+}
+```
+
+Rows missing the tag fall back to `"(none)"`. The tag key must be an identifier
+(`[A-Za-z_][A-Za-z0-9_]*`); other keys are ignored. **For reconciliation**: a
+tenant's `micro_usd / 10_000` = US-cents, comparable to a caller-side
+`SUM(cost_cents)` per tenant. **Leak note**: this returns *all* tenants — a
+multi-tenant app showing one curator their cost must filter server-side with
+`tag.tenantId=<that tenant>`, never expose the full `by_group`.
 
 ## `GET /api/cost/timeseries`
 

@@ -9,6 +9,7 @@ import { registerCostRoutes } from './routes';
 
 const MIGRATIONS = new URL('../db/migrations', import.meta.url).pathname;
 const KEY = 'uk_xrt';
+const MULTI_KEY = 'uk_multi';
 const app = new Hono();
 
 beforeAll(() => {
@@ -36,6 +37,15 @@ beforeAll(() => {
   run({ provider: 'anthropic', model: 'claude-sonnet-4-6', tier: 'smart', inputTokens: 200, outputTokens: 20, costUsd: 0, tags: { capability: 'chat', transport: 'subprocess' } }); // free (Max)
   // a run on the OTHER project — must never appear in xrt81's totals
   run({ projectId: 'other', costUsd: 9.99, tags: { capability: 'chat', transport: 'http' } });
+
+  // multi-tenant runs (ai-sdk labels → tags.tenantId) on their OWN project so
+  // xrt81's exact totals above stay untouched. tenant filter + groupBy assert here.
+  db.insert(schema.projects)
+    .values({ id: 'multi', name: 'Multi', dsn: 'https://k@upmetrics.org/multi', apiKey: MULTI_KEY, platform: 'web', retentionDays: 30, agentRetentionDays: 90, createdAt: new Date(), updatedAt: new Date() })
+    .run();
+  run({ projectId: 'multi', costUsd: 0.01, tags: { capability: 'chat', transport: 'http', tenantId: 'sanne' } });
+  run({ projectId: 'multi', costUsd: 0.02, tags: { capability: 'chat', transport: 'http', tenantId: 'sanne' } });
+  run({ projectId: 'multi', costUsd: 0.04, tags: { capability: 'chat', transport: 'http', tenantId: 'bob' } });
 
   registerCostRoutes(app);
 });
@@ -80,6 +90,31 @@ describe('GET /api/cost/summary', () => {
     const oai = await json(await get('/api/cost/summary?provider=openai'));
     expect(oai.run_count).toBe(1);
     expect(oai.total_micro_usd).toBe(2000);
+  });
+});
+
+describe('multi-tenant cost slicing (tags.tenantId)', () => {
+  it('?tag.tenantId=<id> filters to one tenant', async () => {
+    const b = await json(await get('/api/cost/summary?tag.tenantId=sanne', MULTI_KEY));
+    expect(b.run_count).toBe(2);
+    expect(b.total_micro_usd).toBe(30000); // (0.01 + 0.02)
+    const bob = await json(await get('/api/cost/summary?tag.tenantId=bob', MULTI_KEY));
+    expect(bob.run_count).toBe(1);
+    expect(bob.total_micro_usd).toBe(40000);
+  });
+
+  it('?groupBy=tenantId breaks cost down per tenant', async () => {
+    const b = await json(await get('/api/cost/summary?groupBy=tenantId', MULTI_KEY));
+    expect(b.group_by).toBe('tenantId');
+    const byTenant = Object.fromEntries(b.by_group.map((x: any) => [x.key, x.micro_usd]));
+    expect(byTenant.sanne).toBe(30000);
+    expect(byTenant.bob).toBe(40000);
+  });
+
+  it('no by_group key when groupBy is absent', async () => {
+    const b = await json(await get('/api/cost/summary', MULTI_KEY));
+    expect(b.by_group).toBeUndefined();
+    expect(b.group_by).toBeUndefined();
   });
 });
 

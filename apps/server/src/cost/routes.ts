@@ -37,8 +37,16 @@ function resolveWindow(q: Record<string, string | undefined>, now: number) {
   return { fromMs, toMs };
 }
 
+// A tag key safe to embed in a json path / group label. The SDK merges generic
+// `labels` (tenantId, kbId, …) into tags (ai-sdk #2676), so cost can be sliced
+// per tenant within ONE project — no per-tenant api_key. Identifier-only keys
+// keep the json-path bind injection-safe and reject malformed query params.
+const TAG_KEY = /^[A-Za-z_][A-Za-z0-9_]*$/;
+const tagPath = (key: string) => `$.${key}`;
+
 // Composable WHERE: project + window + optional filters. transport lives in the
-// tags JSON, so it's matched via json_extract.
+// tags JSON, so it's matched via json_extract. Any `?tag.<key>=<value>` param
+// becomes a generic tag match (the per-tenant filter trail's panel queries with).
 function buildWhere(projectId: string, fromMs: number, toMs: number, q: Record<string, string | undefined>) {
   const parts = [
     sql`project_id = ${projectId}`,
@@ -50,6 +58,11 @@ function buildWhere(projectId: string, fromMs: number, toMs: number, q: Record<s
   if (q.tier) parts.push(sql`tier = ${q.tier}`);
   if (q.agent_name) parts.push(sql`agent_name = ${q.agent_name}`);
   if (q.transport) parts.push(sql`json_extract(tags, '$.transport') = ${q.transport}`);
+  for (const [k, v] of Object.entries(q)) {
+    if (!k.startsWith('tag.') || v == null) continue;
+    const key = k.slice(4);
+    if (TAG_KEY.test(key)) parts.push(sql`json_extract(tags, ${tagPath(key)}) = ${v}`);
+  }
   return sql.join(parts, sql` AND `);
 }
 
@@ -90,7 +103,7 @@ export function costSummary(db: Db, projectId: string, q: Record<string, string 
       COALESCE(SUM(CASE WHEN ${FREE} THEN 1 ELSE 0 END), 0) AS free_run_count
     FROM agent_runs WHERE ${where}
   `) as Record<string, number>[])[0] ?? {};
-  return {
+  const summary = {
     generated_at: new Date(now).toISOString(),
     window: { from: new Date(fromMs).toISOString(), to: new Date(toMs).toISOString() },
     total_micro_usd: microUsd(t.cost_usd),
@@ -105,6 +118,11 @@ export function costSummary(db: Db, projectId: string, q: Record<string, string 
     by_tier: breakdown(db, where, sql`COALESCE(tier, '(none)')`),
     by_capability: breakdown(db, where, sql`COALESCE(json_extract(tags, '$.capability'), '(none)')`),
   };
+  // ?groupBy=<tagKey> → cost per tag value (e.g. groupBy=tenantId → cost per tenant).
+  if (q.groupBy && TAG_KEY.test(q.groupBy)) {
+    return { ...summary, group_by: q.groupBy, by_group: breakdown(db, where, sql`COALESCE(json_extract(tags, ${tagPath(q.groupBy)}), '(none)')`) };
+  }
+  return summary;
 }
 
 export function costTimeseries(db: Db, projectId: string, q: Record<string, string | undefined>, now: number) {
