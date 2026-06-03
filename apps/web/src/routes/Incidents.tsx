@@ -24,10 +24,14 @@ interface Incident {
     attempts?: { at: string; attempt: number; status?: number; ok?: boolean; error?: string }[];
     callbacks?: { at: string; status: string; detail?: string }[];
   } | null;
+  relayRequestedAt: string | null;
+  relayClaimedAt: string | null;
+  relaySession: string | null;
 }
 interface Detail {
   incident: Incident;
   trigger_events: { id: string; kind: string; occurredAt: string }[];
+  has_webhook: boolean;
 }
 
 const SEV_TONE: Record<string, 'down' | 'warn' | 'muted'> = { critical: 'down', high: 'down', medium: 'warn', low: 'muted' };
@@ -134,9 +138,10 @@ function IncidentDetail({ id, onClose, onChanged }: { id: string; onClose: () =>
   const remediate = async () => {
     setBusy(true);
     try {
-      await api(`/dashboard/incidents/${id}/remediate`, { method: 'POST' });
-      toast('Remediation dispatched', 'success');
+      const r = await api<{ mode?: string }>(`/dashboard/incidents/${id}/remediate`, { method: 'POST' });
+      toast(r.mode === 'webhook' ? 'Webhook remediation dispatched' : 'Re-queued to Buddy relay', 'success');
       reload();
+      onChanged();
     } catch (e) {
       toast(e instanceof Error ? e.message : 'Remediation failed', 'error');
     } finally {
@@ -153,34 +158,36 @@ function IncidentDetail({ id, onClose, onChanged }: { id: string; onClose: () =>
       ) : error || !data ? (
         <ErrorBox msg={error ?? 'Not found'} />
       ) : (
-        <div class="max-h-[70vh] space-y-4 overflow-y-auto pr-1 text-sm">
+        <div class="space-y-4 text-sm">
           <div class="flex flex-wrap items-center gap-2">
             <Badge tone={SEV_TONE[data.incident.severity] ?? 'muted'}>{data.incident.severity}</Badge>
             <Badge tone={STATUS_TONE[data.incident.status] ?? 'muted'}>{data.incident.status}</Badge>
             <span class="text-[var(--muted)]">{data.incident.kind} · opened {fmtDate(data.incident.openedAt)}{data.incident.resolvedAt ? ` · resolved ${fmtDate(data.incident.resolvedAt)}` : ''}</span>
           </div>
 
-          {/* remediation timeline */}
+          {/* remediation status — relay (F010 live path) first, then any legacy webhook attempts */}
           <div>
             <div class="mb-1 text-sm font-medium">Remediation</div>
-            {!ra ? (
-              <p class="text-xs text-[var(--muted)]">Not dispatched.</p>
-            ) : (
-              <div class="space-y-1 text-xs">
-                <div class={ra.delivered ? '' : 'text-[var(--warn)]'}>Delivered: {String(ra.delivered)}</div>
-                {(ra.attempts ?? []).map((a, i) => (
-                  <div key={i} class="text-[var(--muted)]">
-                    attempt {a.attempt} · {fmtDate(a.at)} · {a.error ? `error: ${a.error}` : `HTTP ${a.status}`}
-                  </div>
-                ))}
-                {(ra.callbacks ?? []).map((cb, i) => (
-                  <div key={`cb${i}`} style={{ color: 'var(--ok)' }}>
-                    callback · {fmtDate(cb.at)} · {cb.status}
-                    {cb.detail ? ` — ${cb.detail}` : ''}
-                  </div>
-                ))}
-              </div>
-            )}
+            <div class="space-y-1 text-xs">
+              {data.incident.relayClaimedAt ? (
+                <div style={{ color: 'var(--ok)' }}>Relayed to {data.incident.relaySession ?? 'a cc session'} · {fmtRel(data.incident.relayClaimedAt)}</div>
+              ) : data.incident.relayRequestedAt ? (
+                <div class="text-[var(--warn)]">Queued for relay · {fmtRel(data.incident.relayRequestedAt)} — awaiting a cc session</div>
+              ) : (
+                <div class="text-[var(--muted)]">Not queued for relay.</div>
+              )}
+              {ra && (
+                <>
+                  <div class={ra.delivered ? '' : 'text-[var(--warn)]'}>Webhook delivered: {String(ra.delivered)}</div>
+                  {(ra.attempts ?? []).map((a, i) => (
+                    <div key={i} class="text-[var(--muted)]">attempt {a.attempt} · {fmtDate(a.at)} · {a.error ? `error: ${a.error}` : `HTTP ${a.status}`}</div>
+                  ))}
+                  {(ra.callbacks ?? []).map((cb, i) => (
+                    <div key={`cb${i}`} style={{ color: 'var(--ok)' }}>callback · {fmtDate(cb.at)} · {cb.status}{cb.detail ? ` — ${cb.detail}` : ''}</div>
+                  ))}
+                </>
+              )}
+            </div>
           </div>
 
           {/* trigger events */}
@@ -205,7 +212,7 @@ function IncidentDetail({ id, onClose, onChanged }: { id: string; onClose: () =>
               Resolve
             </Button>
             <Button variant="ghost" loading={busy} onClick={remediate}>
-              Re-run remediation
+              {data.has_webhook ? 'Re-run remediation' : 'Re-queue to remediation'}
             </Button>
           </div>
         </div>

@@ -573,7 +573,10 @@ export function registerDashboardRoutes(app: Hono): void {
       .orderBy(desc(schema.events.receivedAt))
       .limit(10)
       .all();
-    return c.json({ incident, trigger_events: events });
+    // has_webhook tells the modal which remediation path applies: the legacy
+    // F005.3 webhook dispatch (only if a URL is configured) vs the F010 relay feed.
+    const project = db.select({ webhook: schema.projects.remediationWebhookUrl }).from(schema.projects).where(eq(schema.projects.id, incident.projectId)).get();
+    return c.json({ incident, trigger_events: events, has_webhook: Boolean(project?.webhook) });
   });
 
   app.post('/api/dashboard/incidents/:id/status', async (c) => {
@@ -587,15 +590,24 @@ export function registerDashboardRoutes(app: Hono): void {
     return c.json({ ok: true });
   });
 
-  // Manual remediation — force a (re-)dispatch regardless of threshold/dedup.
+  // Re-run remediation. Two paths: the legacy F005.3 webhook dispatch ONLY when a
+  // project has an external webhook configured; otherwise re-queue the incident
+  // into the F010 relay feed Buddy polls (the live fleet path) — re-request + clear
+  // any prior claim so a cc session picks it up again. No more dead-end 409.
   app.post('/api/dashboard/incidents/:id/remediate', async (c) => {
     if (!(await requireUser(c))) return c.json({ error: 'unauthorized' }, 401);
     const db = getDb();
     const incident = db.select().from(schema.incidents).where(eq(schema.incidents.id, c.req.param('id'))).get();
     if (!incident) return c.json({ error: 'not_found' }, 404);
     const project = db.select().from(schema.projects).where(eq(schema.projects.id, incident.projectId)).get();
-    if (!project?.remediationWebhookUrl) return c.json({ error: 'no_remediation_webhook' }, 409);
-    await dispatchRemediation(db, incident, project, new Date());
-    return c.json({ ok: true });
+    if (project?.remediationWebhookUrl) {
+      await dispatchRemediation(db, incident, project, new Date());
+      return c.json({ ok: true, mode: 'webhook' });
+    }
+    db.update(schema.incidents)
+      .set({ relayRequestedAt: new Date(), relayClaimedAt: null, relaySession: null, status: 'open', resolvedAt: null })
+      .where(eq(schema.incidents.id, incident.id))
+      .run();
+    return c.json({ ok: true, mode: 'relay' });
   });
 }
