@@ -189,6 +189,10 @@ export const incidents = sqliteTable(
     // successful push so each incident becomes at most one card (cardmem also
     // dedups on fingerprint as a backstop). Null = not yet pushed.
     cardmemPushedAt: integer('cardmem_pushed_at', { mode: 'timestamp_ms' }),
+    // F010.5 — escalated to the fleet Discord because it stayed unclaimed past
+    // REMEDIATION_ESCALATE_MS (no cc session picked it up). Set once → alert at
+    // most once per incident. Null = not yet escalated.
+    escalationAlertedAt: integer('escalation_alerted_at', { mode: 'timestamp_ms' }),
   },
   (t) => [index('incidents_project_idx').on(t.projectId)],
 );

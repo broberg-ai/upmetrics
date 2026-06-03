@@ -174,7 +174,7 @@ export async function runAlertsStorm(db: Db, now: Date = new Date()): Promise<St
 
 // Thin delivery to the fleet/deadman Discord webhook. No-ops (logs) when the
 // webhook isn't configured — the decision logic above is what's unit-tested.
-async function sendFleet(webhookUrl: string, message: string, color: number): Promise<void> {
+export async function sendFleet(webhookUrl: string, message: string, color: number): Promise<void> {
   if (!webhookUrl) {
     console.warn('[storm] FLEET_ALERT_DISCORD_WEBHOOK unset; would have sent:', message.split('\n')[0]);
     return;

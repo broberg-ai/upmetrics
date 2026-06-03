@@ -15,6 +15,7 @@ import { config } from '../config';
 import { runAlertsStorm } from './storm';
 import { runRemediation } from './remediation';
 import { pushPendingToCardmem } from './cardmem-push';
+import { escalateUnclaimed } from './escalation';
 
 type Db = ReturnType<typeof getDb>;
 type Severity = 'critical' | 'high' | 'medium' | 'low';
@@ -210,6 +211,7 @@ export function startCorrelationWorker(): void {
       void runAlertsStorm(db).catch((err) => console.error('[alerts] tick failed:', err)); // F005.2 + F008.3 storm-control
       void runRemediation(db).catch((err) => console.error('[remediation] tick failed:', err)); // F005.3 — dispatch
       void pushPendingToCardmem(db).catch((err) => console.error('[cardmem-push] tick failed:', err)); // F005.4 — Inbox cards
+      void escalateUnclaimed(db).catch((err) => console.error('[escalation] tick failed:', err)); // F010.5 — alert remediations no session claimed
     } catch (err) {
       console.error('[correlation] tick failed:', err);
     }

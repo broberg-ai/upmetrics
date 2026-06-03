@@ -57,6 +57,13 @@
       "when": 1780495883674,
       "tag": "0007_stormy_shadowcat",
       "breakpoints": true
+    },
+    {
+      "idx": 8,
+      "version": "6",
+      "when": 1780502089777,
+      "tag": "0008_nosy_nighthawk",
+      "breakpoints": true
     }
   ]
 }

@@ -1,0 +1,1 @@
+ALTER TABLE `incidents` ADD `escalation_alerted_at` integer;
