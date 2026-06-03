@@ -10,6 +10,7 @@ import { registerIncidentRoutes } from './incidents/routes';
 import { registerDashboardRoutes } from './dashboard/routes';
 import { registerCostRoutes } from './cost/routes';
 import { registerRemediationRoutes } from './incidents/relay';
+import { registerIssueRoutes } from './issues/routes';
 import { captureSelf } from './dogfood';
 
 export function createApp() {
@@ -22,6 +23,7 @@ export function createApp() {
   registerDashboardRoutes(app);
   registerCostRoutes(app); // F014 — per-project cost read-API
   registerRemediationRoutes(app); // F010 — auto-remediation pull-feed
+  registerIssueRoutes(app); // F010.7 — self-service issue list + resolve (project key)
 
   app.get('/health', (c) =>
     c.json({ status: 'ok', service: '@upmetrics/server', ts: Date.now() }),

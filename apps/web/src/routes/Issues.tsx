@@ -102,7 +102,7 @@ export function Issues() {
                 <div class="break-words font-medium">{i.title}</div>
                 {i.culprit && <div class="mb-2 break-all text-xs text-[var(--muted)]">{i.culprit}</div>}
                 <div class="mt-1 flex flex-wrap items-center gap-2 text-xs">
-                  <Badge tone="muted">{projName.get(i.projectId) ?? i.projectId}</Badge>
+                  <span class="text-[var(--muted)]">{projName.get(i.projectId) ?? i.projectId}</span>
                   <Badge tone={LEVEL_TONE[i.level] ?? 'muted'}>{i.level}</Badge>
                   <Badge tone={STATUS_TONE[i.status] ?? 'muted'}>{i.status}</Badge>
                   <span class="text-[var(--muted)]">{i.eventCount} events</span>
@@ -136,9 +136,7 @@ export function Issues() {
                     <div class="font-medium">{i.title}</div>
                     {i.culprit && <div class="text-xs text-[var(--muted)]">{i.culprit}</div>}
                   </td>
-                  <td class="px-4 py-2">
-                    <Badge tone="muted">{projName.get(i.projectId) ?? i.projectId}</Badge>
-                  </td>
+                  <td class="px-4 py-2 text-[var(--muted)]">{projName.get(i.projectId) ?? i.projectId}</td>
                   <td class="px-4 py-2">
                     <Badge tone={LEVEL_TONE[i.level] ?? 'muted'}>{i.level}</Badge>
                   </td>
