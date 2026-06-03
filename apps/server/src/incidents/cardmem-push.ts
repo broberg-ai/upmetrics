@@ -97,7 +97,9 @@ export function buildIncidentBody(inc: Incident, project: Project, issue: Issue 
     url: `${config.authBaseUrl}/incidents?id=${inc.id}`,
     incident_id: inc.id,
     claim_url: `${config.authBaseUrl}/api/remediation/${inc.id}/claim?t=${signClaim(inc.id)}`,
-    github_repo_full_name: project.repo ?? undefined, // sanity-check; the key routes
+    // Full "owner/repo" so cardmem can tag/route the Inbox card (repo:<full_name>).
+    // Prefer githubRepo (full slug); fall back to the routing basename.
+    github_repo_full_name: project.githubRepo ?? project.repo ?? undefined,
   };
 }
 
