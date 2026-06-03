@@ -50,6 +50,13 @@
       "when": 1780395514271,
       "tag": "0006_tricky_quasar",
       "breakpoints": true
+    },
+    {
+      "idx": 7,
+      "version": "6",
+      "when": 1780495883674,
+      "tag": "0007_stormy_shadowcat",
+      "breakpoints": true
     }
   ]
 }

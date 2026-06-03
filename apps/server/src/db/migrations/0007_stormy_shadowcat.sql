@@ -1,0 +1,1 @@
+ALTER TABLE `projects` ADD `remediation_relay_severity` text;

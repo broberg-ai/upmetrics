@@ -1,8 +1,9 @@
 // F010 auto-remediation relay. Run: bun test src/incidents/relay.test.ts
 import { describe, it, expect } from 'bun:test';
 import { migrate } from 'drizzle-orm/bun-sqlite/migrator';
+import { eq } from 'drizzle-orm';
 import { createDb, schema, type Db } from '../db';
-import { pendingRemediations, claimRemediation, unclaimedEscalations } from './relay';
+import { pendingRemediations, claimRemediation, unclaimedEscalations, enrollmentView, buildEnrollmentPatch, applyEnrollment } from './relay';
 
 const MIGRATIONS = new URL('../db/migrations', import.meta.url).pathname;
 const NOW = new Date('2026-05-31T12:00:00Z');
@@ -166,5 +167,46 @@ describe('F010 remediation relay (pull feed)', () => {
     const esc = unclaimedEscalations(db, NOW); // default window 30m
     expect(esc.length).toBe(1);
     expect(esc[0]!.issue.id).toBe('iss_old');
+  });
+});
+
+describe('F010.5 self-service enrollment', () => {
+  it('per-project severity override lets a medium spike through (global gate is high)', () => {
+    const db = freshDb();
+    // opted in + repo set, but lowered the gate to medium for this project
+    addProject(db, 'low-gate', { remediationRelay: true, repo: 'low-gate', remediationRelaySeverity: 'medium' });
+    addIssue(db, 'iss_lg', 'low-gate');
+    addIncident(db, 'low-gate', { triggerRef: 'iss_lg', severity: 'medium' });
+    expect(pendingRemediations(db).length).toBe(1); // medium ≥ medium → relayed
+  });
+
+  it('null severity inherits the global gate (high) → a medium spike is excluded', () => {
+    const db = freshDb();
+    addProject(db, 'def', { remediationRelay: true, repo: 'def' }); // remediationRelaySeverity = null
+    addIssue(db, 'iss_def', 'def');
+    addIncident(db, 'def', { triggerRef: 'iss_def', severity: 'medium' });
+    expect(pendingRemediations(db).length).toBe(0); // medium < high → excluded
+  });
+
+  it('enrollmentView exposes enabled/repo/severity + effective_severity', () => {
+    const db = freshDb();
+    addProject(db, 'v', { remediationRelay: true, repo: 'v', remediationRelaySeverity: null });
+    const p = db.select().from(schema.projects).where(eq(schema.projects.id, 'v')).get()!;
+    const view = enrollmentView(p);
+    expect(view).toMatchObject({ project: 'v', enabled: true, repo: 'v', severity: null, effective_severity: 'high' });
+  });
+
+  it('buildEnrollmentPatch validates severity + maps fields; applyEnrollment persists', () => {
+    const db = freshDb();
+    addProject(db, 'w', {}); // defaults: relay off, no repo
+    expect('error' in buildEnrollmentPatch({ severity: 'bananas' })).toBe(true);
+    const patch = buildEnrollmentPatch({ enabled: true, repo: ' w ', severity: 'critical' });
+    expect(patch).toEqual({ remediationRelay: true, repo: 'w', remediationRelaySeverity: 'critical' });
+    const view = applyEnrollment(db, 'w', patch as any);
+    expect(view).toMatchObject({ enabled: true, repo: 'w', severity: 'critical', effective_severity: 'critical' });
+    // empty severity string clears back to inherit-global
+    const cleared = applyEnrollment(db, 'w', buildEnrollmentPatch({ severity: '' }) as any);
+    expect(cleared.severity).toBe(null);
+    expect(cleared.effective_severity).toBe('high');
   });
 });

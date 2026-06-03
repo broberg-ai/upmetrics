@@ -27,6 +27,10 @@ export const projects = sqliteTable('projects', {
   // an issue (distinct from `repo`, which is just the basename Buddy routes on).
   githubRepo: text('github_repo'), // e.g. "broberg-ai/upmetrics"
   remediationRelay: integer('remediation_relay', { mode: 'boolean' }).notNull().default(false),
+  // F010.5 — per-project override of the global REMEDIATION_RELAY_SEVERITY gate
+  // (null → fall back to config.remediationRelaySeverity). Set self-service via
+  // /api/remediation/enrollment (project key) or the dashboard settings card.
+  remediationRelaySeverity: text('remediation_relay_severity'), // null | low | medium | high | critical
   createdAt: integer('created_at', { mode: 'timestamp_ms' }).notNull(),
   updatedAt: integer('updated_at', { mode: 'timestamp_ms' }).notNull(),
 });

@@ -7,7 +7,7 @@ import { getDb, schema } from '../db';
 import { auth } from '../auth';
 import { deleteProbeJob, setProbeJobEnabled, updateProbeJob } from '../probes/cronjobs';
 import { dispatchRemediation } from '../incidents/remediation';
-import { pendingRemediations } from '../incidents/relay';
+import { pendingRemediations, enrollmentView, buildEnrollmentPatch, applyEnrollment } from '../incidents/relay';
 
 async function requireUser(c: Context): Promise<boolean> {
   const session = await auth.api.getSession({ headers: c.req.raw.headers });
@@ -141,7 +141,21 @@ export function registerDashboardRoutes(app: Hono): void {
       cost_total: costAgg(eq(schema.agentRuns.projectId, pid)),
       latest_sdk_version: latestSdkVersion,
       components,
+      remediation: enrollmentView(project), // F010.5 — current enrollment for the settings card
     });
+  });
+
+  // F010.5 — update a project's remediation enrollment from the dashboard
+  // (session auth). Same validation/write path as the self-service key route.
+  app.patch('/api/dashboard/projects/:id/remediation', async (c) => {
+    if (!(await requireUser(c))) return c.json({ error: 'unauthorized' }, 401);
+    const db = getDb();
+    const project = db.select().from(schema.projects).where(eq(schema.projects.id, c.req.param('id'))).get();
+    if (!project) return c.json({ error: 'not_found' }, 404);
+    const body = (await c.req.json().catch(() => ({}))) as Record<string, unknown>;
+    const patch = buildEnrollmentPatch(body);
+    if ('error' in patch) return c.json(patch, 400);
+    return c.json(applyEnrollment(db, project.id, patch));
   });
 
   // The actual errors behind a component's count — so "22 err" is drillable.

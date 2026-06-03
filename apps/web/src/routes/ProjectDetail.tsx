@@ -1,7 +1,10 @@
 import { useState } from 'preact/hooks';
 import { ChevronDown, ChevronRight, ArrowLeft } from 'lucide-preact';
 import { useApi } from '../lib/useApi';
-import { Card, Badge, StatusDot, Spinner } from '../components/ui/controls';
+import { api } from '../lib/api';
+import { Card, Badge, StatusDot, Spinner, Button, Toggle } from '../components/ui/controls';
+import { CustomSelect } from '../components/ui/select';
+import { useToast } from '../components/ui/toast';
 import { Loading, ErrorBox, PageHeader } from '../components/PageState';
 import { fmtRel, fmtDate, usd } from '../lib/format';
 
@@ -13,6 +16,13 @@ interface Component {
   last_seen: number | null;
   sdk_version: string | null;
 }
+interface Enrollment {
+  enabled: boolean;
+  repo: string | null;
+  github_repo: string | null;
+  severity: string | null; // null = inherit global
+  effective_severity: string;
+}
 interface Detail {
   project: { id: string; name: string; platform: string };
   open_issues: number;
@@ -22,6 +32,7 @@ interface Detail {
   cost_total: number;
   latest_sdk_version: string | null;
   components: Component[];
+  remediation: Enrollment;
 }
 interface CompError {
   event_id: string;
@@ -64,6 +75,95 @@ function ComponentErrors({ id, release }: { id: string; release: string }) {
       ))}
       {errors.length === 50 && <div class="px-2 pt-1 text-xs text-[var(--muted)]">Showing latest 50.</div>}
     </div>
+  );
+}
+
+const SEVERITY_OPTIONS = [
+  { value: '', label: 'Inherit global default' },
+  { value: 'low', label: 'Low' },
+  { value: 'medium', label: 'Medium' },
+  { value: 'high', label: 'High' },
+  { value: 'critical', label: 'Critical' },
+];
+
+// F010.5 — self-service remediation enrollment. Toggle the auto-relay opt-in, set
+// the repo basename Buddy routes on, and override the severity gate per project.
+function RemediationSettings({ id, initial }: { id: string; initial: Enrollment }) {
+  const toast = useToast();
+  const [enabled, setEnabled] = useState(initial.enabled);
+  const [repo, setRepo] = useState(initial.repo ?? '');
+  const [severity, setSeverity] = useState(initial.severity ?? '');
+  const [effective, setEffective] = useState(initial.effective_severity);
+  const [busy, setBusy] = useState(false);
+  const dirty = enabled !== initial.enabled || repo !== (initial.repo ?? '') || severity !== (initial.severity ?? '');
+
+  const save = async () => {
+    setBusy(true);
+    try {
+      const r = await api<Enrollment>(`/dashboard/projects/${id}/remediation`, {
+        method: 'PATCH',
+        body: JSON.stringify({ enabled, repo: repo.trim() || null, severity: severity || null }),
+      });
+      setEnabled(r.enabled);
+      setRepo(r.repo ?? '');
+      setSeverity(r.severity ?? '');
+      setEffective(r.effective_severity);
+      toast('Remediation settings saved', 'success');
+    } catch (e) {
+      toast(e instanceof Error ? e.message : 'Save failed', 'error');
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <Card>
+      <div class="mb-1 text-sm font-medium">Auto-remediation</div>
+      <div class="mb-4 text-xs text-[var(--muted)]">
+        When enabled, qualifying error spikes here are relayed to Buddy → a cc session in the repo below. “Push to remediation” on an issue always works regardless of this.
+      </div>
+      <div class="space-y-4">
+        <div class="flex items-center justify-between gap-3">
+          <div>
+            <div class="text-sm font-medium">Auto-relay enabled</div>
+            <div class="text-xs text-[var(--muted)]">Off → only manual pushes relay.</div>
+          </div>
+          <Toggle checked={enabled} onChange={setEnabled} label="Auto-relay enabled" />
+        </div>
+
+        <div class="flex items-center justify-between gap-3">
+          <div class="min-w-0">
+            <div class="text-sm font-medium">Repo</div>
+            <div class="text-xs text-[var(--muted)]">Basename Buddy routes on (e.g. <code>trail</code>).</div>
+          </div>
+          <input
+            value={repo}
+            onInput={(e) => setRepo((e.target as HTMLInputElement).value)}
+            placeholder="repo-basename"
+            class="w-40 rounded-md border px-3 py-1.5 text-sm focus:outline-none focus-visible:ring-2 focus-visible:ring-[var(--primary)]"
+            style={{ background: 'var(--bg)', borderColor: 'var(--border)' }}
+          />
+        </div>
+
+        <div class="flex items-center justify-between gap-3">
+          <div>
+            <div class="text-sm font-medium">Min severity to auto-relay</div>
+            <div class="text-xs text-[var(--muted)]">Effective: {effective}</div>
+          </div>
+          <CustomSelect value={severity} options={SEVERITY_OPTIONS} onChange={setSeverity} placeholder="Inherit global default" />
+        </div>
+
+        {enabled && !repo.trim() && (
+          <div class="text-xs" style={{ color: 'var(--warn)' }}>Set a repo or auto-relay can’t route — nothing fires.</div>
+        )}
+
+        <div class="flex justify-end">
+          <Button variant="primary" loading={busy} disabled={!dirty} onClick={save}>
+            Save
+          </Button>
+        </div>
+      </div>
+    </Card>
   );
 }
 
@@ -141,6 +241,8 @@ export function ProjectDetail({ id }: { id?: string }) {
               </div>
             )}
           </Card>
+
+          <RemediationSettings id={data.project.id} initial={data.remediation} />
         </div>
       )}
     </div>

@@ -56,16 +56,17 @@ export function pendingRemediations(db: Db): RemediationItem[] {
     .all();
 
   const out: RemediationItem[] = [];
-  const minRank = SEVERITY_RANK[config.remediationRelaySeverity] ?? 3;
   for (const inc of open) {
     if (!ERROR_KINDS.has(inc.kind)) continue;
     // A manual push (relayRequestedAt set) is explicit user intent — it bypasses
     // the auto severity threshold and per-project opt-in gates.
     const manual = Boolean(inc.relayRequestedAt);
-    if (!manual && (SEVERITY_RANK[inc.severity] ?? 0) < minRank) continue;
     const project = db.select().from(schema.projects).where(eq(schema.projects.id, inc.projectId)).get();
     if (!project) continue;
     if (!manual && (!project.remediationRelay || !project.repo)) continue;
+    // F010.5 — per-project severity gate (null → global config default).
+    const minRank = SEVERITY_RANK[project.remediationRelaySeverity ?? config.remediationRelaySeverity] ?? 3;
+    if (!manual && (SEVERITY_RANK[inc.severity] ?? 0) < minRank) continue;
     const repo = project.repo ?? project.id;
     // Resolve the representative issue. Some incidents carry an issue id in
     // trigger_ref; correlation-opened spikes use "kind:project" (NOT an issue id)
@@ -142,6 +143,53 @@ export function unclaimedEscalations(db: Db, now: Date = new Date()): Remediatio
   return pendingRemediations(db).filter((r) => r.opened_at.getTime() < cutoff);
 }
 
+// ── F010.5: self-service remediation enrollment ──────────────────────────────
+// A repo manages its OWN remediation enrollment with its project api_key
+// (X-Upmetrics-Key — the same key as cost-ingest), and the dashboard reuses the
+// SAME helpers under session auth. Single write path → no drift between the two.
+type ProjectRow = typeof schema.projects.$inferSelect;
+const SEVERITIES = new Set(['low', 'medium', 'high', 'critical']);
+
+export function enrollmentView(p: ProjectRow) {
+  return {
+    project: p.id,
+    enabled: p.remediationRelay,
+    repo: p.repo,
+    github_repo: p.githubRepo,
+    severity: p.remediationRelaySeverity, // null = inherit the global default
+    effective_severity: p.remediationRelaySeverity ?? config.remediationRelaySeverity,
+  };
+}
+
+type EnrollmentPatch = Partial<Pick<ProjectRow, 'remediationRelay' | 'repo' | 'githubRepo' | 'remediationRelaySeverity'>>;
+
+// Validate + map a request body to a partial projects update (only present keys
+// are touched). Returns {error} on a bad severity so the caller can 400.
+export function buildEnrollmentPatch(body: Record<string, unknown>): EnrollmentPatch | { error: string; allowed: string[] } {
+  const patch: EnrollmentPatch = {};
+  if ('enabled' in body) patch.remediationRelay = Boolean(body.enabled);
+  if ('repo' in body) patch.repo = body.repo ? String(body.repo).trim() : null;
+  if ('github_repo' in body) patch.githubRepo = body.github_repo ? String(body.github_repo).trim() : null;
+  if ('severity' in body) {
+    const s = body.severity;
+    if (s === null || s === '') patch.remediationRelaySeverity = null;
+    else if (typeof s === 'string' && SEVERITIES.has(s)) patch.remediationRelaySeverity = s;
+    else return { error: 'invalid_severity', allowed: [...SEVERITIES] };
+  }
+  return patch;
+}
+
+export function applyEnrollment(db: Db, projectId: string, patch: EnrollmentPatch): ReturnType<typeof enrollmentView> {
+  db.update(schema.projects).set({ ...patch, updatedAt: new Date() }).where(eq(schema.projects.id, projectId)).run();
+  return enrollmentView(db.select().from(schema.projects).where(eq(schema.projects.id, projectId)).get()!);
+}
+
+function projectFromKey(c: Context): ProjectRow | null {
+  const key = c.req.header('x-upmetrics-key');
+  if (!key) return null;
+  return getDb().select().from(schema.projects).where(eq(schema.projects.apiKey, key)).get() ?? null;
+}
+
 // ── routes (Buddy's local poll-loop consumes these, outbound) ────────────────
 function authed(c: Context): boolean {
   const token = config.remediationRelayToken;
@@ -174,5 +222,22 @@ export function registerRemediationRoutes(app: Hono): void {
     const res = claimRemediation(getDb(), incidentId, session);
     if (!res.ok) return c.json({ error: 'unknown_incident' }, 404);
     return c.json({ ok: true, already_claimed: res.alreadyClaimed });
+  });
+
+  // F010.5 — self-service enrollment. A repo reads/sets its OWN remediation
+  // config with its project key (X-Upmetrics-Key, same key as cost-ingest).
+  app.get('/api/remediation/enrollment', (c) => {
+    const project = projectFromKey(c);
+    if (!project) return c.json({ error: 'invalid_api_key' }, 401);
+    return c.json(enrollmentView(project));
+  });
+
+  app.put('/api/remediation/enrollment', async (c) => {
+    const project = projectFromKey(c);
+    if (!project) return c.json({ error: 'invalid_api_key' }, 401);
+    const body = (await c.req.json().catch(() => ({}))) as Record<string, unknown>;
+    const patch = buildEnrollmentPatch(body);
+    if ('error' in patch) return c.json(patch, 400);
+    return c.json(applyEnrollment(getDb(), project.id, patch));
   });
 }

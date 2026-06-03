@@ -59,3 +59,22 @@ export function Badge({ tone = 'muted', children }: { tone?: Tone; children: Com
 export function StatusDot({ tone }: { tone: Tone }) {
   return <span class="inline-block h-2.5 w-2.5 rounded-full" style={{ background: TONE_VAR[tone] }} />;
 }
+
+// Custom switch — never a native checkbox. role/aria + keyboard (Space/Enter on a
+// <button>) + hover/active feedback, per house rules.
+export function Toggle({ checked, onChange, disabled, label }: { checked: boolean; onChange: (v: boolean) => void; disabled?: boolean; label?: string }) {
+  return (
+    <button
+      type="button"
+      role="switch"
+      aria-checked={checked}
+      aria-label={label}
+      disabled={disabled}
+      onClick={() => onChange(!checked)}
+      class="relative inline-flex h-5 w-9 shrink-0 cursor-pointer items-center rounded-full transition active:scale-95 disabled:pointer-events-none disabled:opacity-50 focus:outline-none focus-visible:ring-2 focus-visible:ring-[var(--primary)]"
+      style={{ background: checked ? 'var(--primary)' : 'var(--surface-2)' }}
+    >
+      <span class="inline-block h-4 w-4 rounded-full bg-white transition-transform" style={{ transform: checked ? 'translateX(18px)' : 'translateX(2px)' }} />
+    </button>
+  );
+}
