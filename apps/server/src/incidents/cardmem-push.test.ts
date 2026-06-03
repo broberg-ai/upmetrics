@@ -51,6 +51,17 @@ describe('pushPendingToCardmem', () => {
     expect(db.select().from(schema.incidents).where(eq(schema.incidents.id, 'inc1')).get()!.cardmemPushedAt).not.toBeNull();
   });
 
+  it('default scope (no projects opt) = enrolled remediation_relay projects', async () => {
+    const db = seed();
+    // enroll p2 only; cardmem stays un-enrolled in this seed
+    db.update(schema.projects).set({ remediationRelay: true }).where(eq(schema.projects.id, 'p2')).run();
+    const captured: any[] = [];
+    // NOTE: no `projects` key → falls back to enrolledProjectIds(db)
+    const n = await pushPendingToCardmem(db, { url: OPTS.url, key: OPTS.key, now: NOW, fetchFn: mockFetch(captured) });
+    expect(n).toBe(1); // only p2 (enrolled); cardmem incident excluded (not enrolled)
+    expect(captured.map((c) => c.body.incident_id)).toEqual(['inc2']);
+  });
+
   it('is idempotent — a second tick pushes nothing (one card per incident)', async () => {
     const db = seed();
     await pushPendingToCardmem(db, { ...OPTS, fetchFn: mockFetch([]) });

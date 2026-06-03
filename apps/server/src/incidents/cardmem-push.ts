@@ -65,6 +65,19 @@ function pendingCardmemPush(db: Db, projects: string[]): Array<{ inc: Incident; 
   return out;
 }
 
+// Default cardmem-push scope = every project enrolled in remediation
+// (remediation_relay=1) — the SAME enrollment that drives the F010 pull-feed, so
+// there's one source of truth (toggle enrollment → both the Buddy relay AND the
+// cardmem Inbox backstop follow). No separate env list to drift. F010.5.
+function enrolledProjectIds(db: Db): string[] {
+  return db
+    .select({ id: schema.projects.id })
+    .from(schema.projects)
+    .where(eq(schema.projects.remediationRelay, true))
+    .all()
+    .map((r) => r.id);
+}
+
 export function buildIncidentBody(inc: Incident, project: Project, issue: Issue | undefined) {
   const detail = [
     issue?.culprit ? `**Culprit:** \`${issue.culprit}\`` : '',
@@ -105,7 +118,7 @@ export async function pushPendingToCardmem(db: Db, opts: PushOpts = {}): Promise
   const now = opts.now ?? new Date();
   const url = opts.url ?? config.cardmemIncidentsUrl;
   const key = opts.key ?? config.cardmemIncidentsKey;
-  const projects = opts.projects ?? (config.cardmemPushProjects as string[]);
+  const projects = opts.projects ?? enrolledProjectIds(db);
   if (!key) return 0; // disabled until the key is configured
   let pushed = 0;
   for (const { inc, project, issue } of pendingCardmemPush(db, projects)) {
