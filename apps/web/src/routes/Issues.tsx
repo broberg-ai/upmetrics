@@ -1,6 +1,6 @@
 import { useState } from 'preact/hooks';
 import { useLocation } from 'preact-iso';
-import { Send, Github } from 'lucide-preact';
+import { Send, Github, Copy, Check } from 'lucide-preact';
 import { useApi } from '../lib/useApi';
 import { api } from '../lib/api';
 import { fmtDate, fmtRel } from '../lib/format';
@@ -166,6 +166,7 @@ function IssueDetail({ id, onClose, onChanged }: { id: string; onClose: () => vo
   const toast = useToast();
 
   const [assignee, setAssignee] = useState('');
+  const [copied, setCopied] = useState(false);
   const setStatus = async (status: string) => {
     setBusy(true);
     try {
@@ -208,6 +209,30 @@ function IssueDetail({ id, onClose, onChanged }: { id: string; onClose: () => vo
   const exc = latest?.payload?.exception?.values?.[0];
   const breadcrumbs = latest?.payload?.breadcrumbs ?? [];
   const tags = latest?.payload?.tags ?? {};
+
+  // Copy the full error context (title + type:value + stack + tags + link) as
+  // plain text — paste into a chat / GitHub issue without retyping.
+  const copyDetails = async () => {
+    if (!data) return;
+    const i = data.issue;
+    const frames = (exc?.stacktrace?.frames ?? []) as Array<{ function?: string; filename?: string; module?: string; lineno?: number; colno?: number }>;
+    const text = [
+      i.title,
+      exc ? `${exc.type}: ${exc.value ?? ''}` : '',
+      ...[...frames].reverse().map((f) => `  ${f.function || '?'} @ ${f.filename || f.module || '?'}${f.lineno ? `:${f.lineno}` : ''}${f.colno ? `:${f.colno}` : ''}`),
+      Object.keys(tags).length ? `tags: ${Object.entries(tags).map(([k, v]) => `${k}=${String(v)}`).join(' ')}` : '',
+      `${i.eventCount} events · first ${fmtDate(i.firstSeen)} · last ${fmtDate(i.lastSeen)}`,
+      `${location.origin}/issues?project=${i.projectId}`,
+    ].filter(Boolean).join('\n');
+    try {
+      await navigator.clipboard.writeText(text);
+      setCopied(true);
+      toast('Copied to clipboard', 'success');
+      setTimeout(() => setCopied(false), 1500);
+    } catch {
+      toast('Copy failed', 'error');
+    }
+  };
 
   return (
     <Modal open onClose={onClose} title={data?.issue.title ?? 'Issue'}>
@@ -282,6 +307,9 @@ function IssueDetail({ id, onClose, onChanged }: { id: string; onClose: () => vo
             </Button>
             <Button variant="ghost" loading={busy} onClick={() => setStatus('unresolved')}>
               Reopen
+            </Button>
+            <Button variant="ghost" onClick={copyDetails} title="Copy the error + stack as text">
+              {copied ? <Check size={14} /> : <Copy size={14} />} {copied ? 'Copied' : 'Copy'}
             </Button>
             {data.github_repo && (
               <a
