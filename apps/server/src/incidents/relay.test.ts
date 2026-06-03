@@ -151,6 +151,8 @@ describe('F010 remediation relay (pull feed)', () => {
     const c1 = claimRemediation(db, id, 'cardmem');
     expect(c1).toEqual({ ok: true, alreadyClaimed: false });
     expect(pendingRemediations(db).length).toBe(0); // dropped out
+    // claim moves the incident out of the raw "open" alarm into acknowledged
+    expect(db.select().from(schema.incidents).where(eq(schema.incidents.id, id)).get()!.status).toBe('acknowledged');
 
     const c2 = claimRemediation(db, id, 'cardmem'); // idempotent
     expect(c2).toEqual({ ok: true, alreadyClaimed: true });

@@ -129,8 +129,11 @@ export function claimRemediation(db: Db, incidentId: string, session: string, no
   const inc = db.select().from(schema.incidents).where(eq(schema.incidents.id, incidentId)).get();
   if (!inc) return { ok: false, alreadyClaimed: false };
   if (inc.relayClaimedAt) return { ok: true, alreadyClaimed: true };
+  // A claim means a cc session now OWNS this incident → move it out of the raw
+  // "open" alarm into "acknowledged" (in progress) so the dashboard reflects
+  // it's being worked, not unhandled. It resolves later when the fix ships.
   db.update(schema.incidents)
-    .set({ relayClaimedAt: now, relaySession: session })
+    .set({ relayClaimedAt: now, relaySession: session, ...(inc.status === 'open' ? { status: 'acknowledged' } : {}) })
     .where(eq(schema.incidents.id, incidentId))
     .run();
   return { ok: true, alreadyClaimed: false };
