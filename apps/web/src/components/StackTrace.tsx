@@ -14,7 +14,7 @@ export function StackTrace({ frames }: { frames?: Frame[] }) {
   return (
     <div class="overflow-hidden rounded-md border font-mono text-xs" style={{ borderColor: 'var(--border)' }}>
       {[...frames].reverse().map((f, i) => (
-        <div key={i} class="border-b px-3 py-1.5 last:border-b-0" style={{ borderColor: 'var(--border)' }}>
+        <div key={i} class="border-b px-3 py-1.5 last:border-b-0 break-all" style={{ borderColor: 'var(--border)' }}>
           <span class="font-semibold">{f.function || '?'}</span>
           <span class="text-[var(--muted)]">
             {' @ '}

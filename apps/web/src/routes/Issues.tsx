@@ -216,7 +216,7 @@ function IssueDetail({ id, onClose, onChanged }: { id: string; onClose: () => vo
       ) : error || !data ? (
         <ErrorBox msg={error ?? 'Not found'} />
       ) : (
-        <div class="max-h-[70vh] space-y-4 overflow-y-auto pr-1">
+        <div class="space-y-4">
           <div class="flex flex-wrap items-center gap-2 text-sm">
             <Badge tone={STATUS_TONE[data.issue.status] ?? 'muted'}>{data.issue.status}</Badge>
             <Badge tone={LEVEL_TONE[data.issue.level] ?? 'muted'}>{data.issue.level}</Badge>
