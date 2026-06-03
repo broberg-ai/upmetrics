@@ -131,16 +131,14 @@ function RemediationSettings({ id, initial }: { id: string; initial: Enrollment 
           <Toggle checked={enabled} onChange={setEnabled} label="Auto-relay enabled" />
         </div>
 
-        <div class="flex items-center justify-between gap-3">
-          <div class="min-w-0">
-            <div class="text-sm font-medium">Repo</div>
-            <div class="text-xs text-[var(--muted)]">Basename Buddy routes on (e.g. <code>trail</code>).</div>
-          </div>
+        <div>
+          <div class="text-sm font-medium">Repo</div>
+          <div class="mb-1.5 text-xs text-[var(--muted)]">Basename Buddy routes on (e.g. <code>trail</code>, <code>fysiodk-aalborg-sport</code>).</div>
           <input
             value={repo}
             onInput={(e) => setRepo((e.target as HTMLInputElement).value)}
             placeholder="repo-basename"
-            class="w-40 rounded-md border px-3 py-1.5 text-sm focus:outline-none focus-visible:ring-2 focus-visible:ring-[var(--primary)]"
+            class="w-full rounded-md border px-3 py-1.5 text-sm focus:outline-none focus-visible:ring-2 focus-visible:ring-[var(--primary)]"
             style={{ background: 'var(--bg)', borderColor: 'var(--border)' }}
           />
         </div>
