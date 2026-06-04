@@ -2,7 +2,7 @@ import { useState } from 'preact/hooks';
 import { Plus } from 'lucide-preact';
 import { useApi } from '../lib/useApi';
 import { api } from '../lib/api';
-import { usd } from '../lib/format';
+import { usd, dkk } from '../lib/format';
 import { Card, Badge, StatusDot, Button } from '../components/ui/controls';
 import { CustomSelect } from '../components/ui/select';
 import { Modal } from '../components/ui/modal';
@@ -166,8 +166,8 @@ export function Overview() {
               <Metric label="Open incidents" value={data.totals.open_incidents} tone={data.totals.open_incidents ? 'down' : undefined} />
             </Card>
             <Card>
-              <Metric label="Fleet agent cost" value={usd(data.totals.agent_cost_total)} />
-              <div class="mt-0.5 text-xs text-[var(--muted)]">{usd(data.totals.agent_cost_today)} today</div>
+              <Metric label="Fleet agent cost" value={`${usd(data.totals.agent_cost_total)} · ${dkk(data.totals.agent_cost_total)}`} />
+              <div class="mt-0.5 text-xs text-[var(--muted)]">{usd(data.totals.agent_cost_today)} · {dkk(data.totals.agent_cost_today)} today</div>
             </Card>
           </div>
 
