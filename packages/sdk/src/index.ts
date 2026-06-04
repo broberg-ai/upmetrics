@@ -11,6 +11,15 @@ export interface InitOptions {
   autoInstrument?: boolean;
   /** Disable PII scrubbing (NOT recommended). Default: false. */
   disableScrub?: boolean;
+  /**
+   * Drop events whose message/exception text matches any entry — known-benign
+   * noise you can't suppress at source (e.g. Capacitor's
+   * "capacitorDidRegisterForRemoteNotifications not called", which fires even
+   * though push works). Strings match case-insensitively as a substring;
+   * RegExp matches as written. Applies to EVERY capture path — auto-instrument
+   * and manual captureException/captureMessage — so the event is never sent.
+   */
+  ignoreErrors?: Array<string | RegExp>;
 }
 
 interface Dsn {
@@ -95,8 +104,26 @@ function baseEvent(): Record<string, unknown> {
   };
 }
 
+// User-declared noise filter (InitOptions.ignoreErrors). A matched event is
+// dropped entirely — never sent, on any path. String entries match
+// case-insensitively as a substring; RegExp entries match as written.
+function isIgnored(text: string): boolean {
+  const patterns = config?.ignoreErrors;
+  if (!patterns?.length) return false;
+  const lower = text.toLowerCase();
+  for (const p of patterns) {
+    if (typeof p === 'string') {
+      if (p && lower.includes(p.toLowerCase())) return true;
+    } else if (p.test(text)) {
+      return true;
+    }
+  }
+  return false;
+}
+
 export function captureException(err: unknown, ctx?: Record<string, unknown>): string | null {
   const e = err instanceof Error ? err : new Error(String(err));
+  if (isIgnored(`${e.name}: ${e.message}`)) return null;
   const event = {
     ...baseEvent(),
     level: 'error',
@@ -109,6 +136,7 @@ export function captureException(err: unknown, ctx?: Record<string, unknown>): s
 }
 
 export function captureMessage(message: string, level = 'info'): string | null {
+  if (isIgnored(message)) return null;
   return send({ ...baseEvent(), level, message });
 }
 
