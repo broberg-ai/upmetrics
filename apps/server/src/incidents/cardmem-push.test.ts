@@ -18,8 +18,11 @@ function seed(): Db {
   db.insert(schema.projects).values({ id: 'cardmem', name: 'Cardmem', dsn: 'https://k@upmetrics.org/cardmem', apiKey: 'uk_cardmem', platform: 'web', repo: 'broberg-ai/cardmem', createdAt: NOW, updatedAt: NOW }).run();
   db.insert(schema.projects).values({ id: 'p2', name: 'P2', dsn: 'https://k@upmetrics.org/p2', apiKey: 'uk_p2', platform: 'web', createdAt: NOW, updatedAt: NOW }).run();
   db.insert(schema.issues).values({ id: 'iss1', projectId: 'cardmem', fingerprint: 'fp1', title: 'TypeError: boom', culprit: 'src/x.ts', level: 'error', firstSeen: NOW, lastSeen: NOW, eventCount: 7 }).run();
-  db.insert(schema.incidents).values({ id: 'inc1', projectId: 'cardmem', kind: 'error_spike', status: 'open', severity: 'high', title: 'error spike in cardmem', openedAt: NOW, triggerRef: 'iss1' }).run();
-  db.insert(schema.incidents).values({ id: 'inc2', projectId: 'p2', kind: 'error_spike', status: 'open', severity: 'high', title: 'p2 spike', openedAt: NOW, triggerRef: 'x' }).run();
+  // manual_remediation only — auto error_spike no longer pushes to cardmem (2026-06-04).
+  db.insert(schema.incidents).values({ id: 'inc1', projectId: 'cardmem', kind: 'manual_remediation', status: 'open', severity: 'high', title: 'error spike in cardmem', openedAt: NOW, triggerRef: 'iss1', relayRequestedAt: NOW }).run();
+  db.insert(schema.incidents).values({ id: 'inc2', projectId: 'p2', kind: 'manual_remediation', status: 'open', severity: 'high', title: 'p2 spike', openedAt: NOW, triggerRef: 'x', relayRequestedAt: NOW }).run();
+  // an AUTO error_spike — must NEVER push (only manual_remediation does)
+  db.insert(schema.incidents).values({ id: 'auto1', projectId: 'cardmem', kind: 'error_spike', status: 'open', severity: 'high', title: 'auto spike', openedAt: NOW, triggerRef: 'iss1' }).run();
   return db;
 }
 
@@ -51,15 +54,13 @@ describe('pushPendingToCardmem', () => {
     expect(db.select().from(schema.incidents).where(eq(schema.incidents.id, 'inc1')).get()!.cardmemPushedAt).not.toBeNull();
   });
 
-  it('default scope (no projects opt) = enrolled remediation_relay projects', async () => {
+  it('default scope = ALL projects, manual_remediation only (auto error_spike never pushes)', async () => {
     const db = seed();
-    // enroll p2 only; cardmem stays un-enrolled in this seed
-    db.update(schema.projects).set({ remediationRelay: true }).where(eq(schema.projects.id, 'p2')).run();
     const captured: any[] = [];
-    // NOTE: no `projects` key → falls back to enrolledProjectIds(db)
+    // no `projects` key → default scope is all projects; KIND is the flood-guard
     const n = await pushPendingToCardmem(db, { url: OPTS.url, key: OPTS.key, now: NOW, fetchFn: mockFetch(captured) });
-    expect(n).toBe(1); // only p2 (enrolled); cardmem incident excluded (not enrolled)
-    expect(captured.map((c) => c.body.incident_id)).toEqual(['inc2']);
+    expect(n).toBe(2); // inc1 (cardmem) + inc2 (p2), both manual; auto1 error_spike excluded
+    expect(captured.map((c) => c.body.incident_id).sort()).toEqual(['inc1', 'inc2']);
   });
 
   it('is idempotent — a second tick pushes nothing (one card per incident)', async () => {

@@ -11,9 +11,14 @@ import { verifyClaim } from './cardmem-push';
 
 type Db = ReturnType<typeof getDb>;
 const SEVERITY_RANK: Record<string, number> = { low: 1, medium: 2, high: 3, critical: 4 };
-// Only code-fixable error incidents — NOT probe_down (infra, not a session's bug).
-// 'manual_remediation' = a user pushed an issue here on demand (F010.4).
-const ERROR_KINDS = new Set(['error_spike', 'agent_failure_spike', 'manual_remediation']);
+// AUTO-RELAY REMOVED (2026-06-04): only DELIBERATE manual pushes relay. A buddy
+// reload-storm flapped error_spike across the threshold → 993 distinct incidents
+// → ~4200 cardmem Inbox cards. Auto error_spike / agent_failure_spike are too
+// churny to relay; they stay visible in upmetrics (Issues/Incidents) but NEVER
+// auto-relay to Buddy or cardmem. probe_down (real downtime) still alerts via the
+// alert engine → Discord, untouched. Re-introducing auto-relay is a deliberate
+// design decision, not a per-project flag flip.
+const ERROR_KINDS = new Set(['manual_remediation']);
 
 // repo basename → absolute path (local to Christian's Mac). Buddy resolves
 // repo→path via its own repos table; repo_path is a best-effort hint.

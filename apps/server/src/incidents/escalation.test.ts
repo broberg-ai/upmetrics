@@ -28,7 +28,7 @@ function addIssue(db: Db, id: string, projectId: string): void {
 function addIncident(db: Db, projectId: string, opts: Partial<typeof schema.incidents.$inferInsert> = {}): string {
   const id = `inc_${++seq}`;
   db.insert(schema.incidents)
-    .values({ id, projectId, kind: 'error_spike', status: 'open', severity: 'high', title: 'error spike', openedAt: PAST, triggerRef: opts.triggerRef ?? 'iss_x', ...opts })
+    .values({ id, projectId, kind: 'manual_remediation', status: 'open', severity: 'high', title: 'manual remediation', openedAt: PAST, triggerRef: opts.triggerRef ?? 'iss_x', relayRequestedAt: opts.relayRequestedAt ?? PAST, ...opts })
     .run();
   return id;
 }

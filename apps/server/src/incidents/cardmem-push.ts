@@ -9,7 +9,12 @@ import { getDb, schema } from '../db';
 import { config } from '../config';
 
 type Db = ReturnType<typeof getDb>;
-const ERROR_KINDS = new Set(['error_spike', 'agent_failure_spike', 'manual_remediation']);
+// Only DELIBERATE remediations go to cardmem's durable Inbox. Auto error_spike /
+// agent_failure_spike are churny (a reload-storm flapped buddy across the
+// threshold → 993 distinct error_spike incidents → 4200 Inbox cards, 2026-06-04).
+// Auto-spikes are handled by the relay (Buddy pull) + escalation (Discord); they
+// must NEVER flood the durable Inbox. The Inbox is a human triage lane.
+const PUSH_KINDS = new Set(['manual_remediation']);
 
 // HMAC(incident_id) with the relay token → a tamper-proof claim token so cardmem
 // can POST claim_url without ever holding REMEDIATION_RELAY_TOKEN. `secret` is
@@ -45,7 +50,7 @@ function pendingCardmemPush(db: Db, projects: string[]): Array<{ inc: Incident; 
     .all();
   const out: Array<{ inc: Incident; project: Project; issue: Issue | undefined }> = [];
   for (const inc of rows) {
-    if (!ERROR_KINDS.has(inc.kind)) continue;
+    if (!PUSH_KINDS.has(inc.kind)) continue;
     const project = db.select().from(schema.projects).where(eq(schema.projects.id, inc.projectId)).get();
     if (!project) continue;
     // Resolve the representative issue (triggerRef, else latest unresolved) — same
@@ -65,17 +70,14 @@ function pendingCardmemPush(db: Db, projects: string[]): Array<{ inc: Incident; 
   return out;
 }
 
-// Default cardmem-push scope = every project enrolled in remediation
-// (remediation_relay=1) — the SAME enrollment that drives the F010 pull-feed, so
-// there's one source of truth (toggle enrollment → both the Buddy relay AND the
-// cardmem Inbox backstop follow). No separate env list to drift. F010.5.
-function enrolledProjectIds(db: Db): string[] {
-  return db
-    .select({ id: schema.projects.id })
-    .from(schema.projects)
-    .where(eq(schema.projects.remediationRelay, true))
-    .all()
-    .map((r) => r.id);
+// Default cardmem-push scope = ALL projects. The flood-guard is now the KIND
+// (PUSH_KINDS = manual_remediation only — see top), not the project list: only a
+// deliberate manual push ever reaches cardmem, from any project, so there's no
+// enrollment-scope to drift and no auto-spike can flood the Inbox regardless of
+// any per-project flag. (2026-06-04 — replaced the enrolled-only scope that, with
+// auto error_spike pushing, flooded cardmem with 4200 cards.)
+function allProjectIds(db: Db): string[] {
+  return db.select({ id: schema.projects.id }).from(schema.projects).all().map((r) => r.id);
 }
 
 export function buildIncidentBody(inc: Incident, project: Project, issue: Issue | undefined) {
@@ -120,7 +122,7 @@ export async function pushPendingToCardmem(db: Db, opts: PushOpts = {}): Promise
   const now = opts.now ?? new Date();
   const url = opts.url ?? config.cardmemIncidentsUrl;
   const key = opts.key ?? config.cardmemIncidentsKey;
-  const projects = opts.projects ?? enrolledProjectIds(db);
+  const projects = opts.projects ?? allProjectIds(db);
   if (!key) return 0; // disabled until the key is configured
   let pushed = 0;
   for (const { inc, project, issue } of pendingCardmemPush(db, projects)) {

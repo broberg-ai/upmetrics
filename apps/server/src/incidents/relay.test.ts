@@ -50,12 +50,13 @@ function addIncident(db: Db, projectId: string, opts: Partial<typeof schema.inci
     .values({
       id,
       projectId,
-      kind: opts.kind ?? 'error_spike',
+      kind: opts.kind ?? 'manual_remediation', // auto-relay removed 2026-06-04 — only manual relays
       status: opts.status ?? 'open',
       severity: opts.severity ?? 'high',
-      title: opts.title ?? 'error spike',
+      title: opts.title ?? 'manual remediation',
       openedAt: opts.openedAt ?? NOW,
       triggerRef: opts.triggerRef ?? 'iss_x',
+      relayRequestedAt: opts.relayRequestedAt ?? NOW, // manual incidents carry this
       ...opts,
     })
     .run();
@@ -82,7 +83,7 @@ describe('F010 remediation relay (pull feed)', () => {
     addProject(db, 'cardmem', { remediationRelay: true, repo: 'cardmem' });
     addIssue(db, 'iss_1', 'cardmem', { title: 'Error: webhookSecret not configured', eventCount: 16 });
     addEvent(db, 'iss_1', 'cardmem', 'cardmem-server', [{ f: 1 }, { f: 2 }, { f: 3 }, { f: 4 }, { f: 5 }, { f: 6 }]);
-    addIncident(db, 'cardmem', { kind: 'error_spike', severity: 'high', triggerRef: 'iss_1' });
+    addIncident(db, 'cardmem', { kind: 'manual_remediation', severity: 'high', triggerRef: 'iss_1', relayRequestedAt: NOW });
 
     const pending = pendingRemediations(db);
     expect(pending.length).toBe(1);
@@ -102,8 +103,8 @@ describe('F010 remediation relay (pull feed)', () => {
     addProject(db, 'cardmem', { remediationRelay: true, repo: 'cardmem' });
     addIssue(db, 'iss_top', 'cardmem', { title: 'Error: real spike', eventCount: 12 });
     addEvent(db, 'iss_top', 'cardmem', 'cardmem-server', [{ f: 'a' }, { f: 'b' }]);
-    // correlation opens error_spike with trigger_ref "error_spike:cardmem" (not an issue id)
-    addIncident(db, 'cardmem', { kind: 'error_spike', severity: 'high', triggerRef: 'error_spike:cardmem' });
+    // a manual push whose trigger_ref isn't an issue id → falls back to the project top issue
+    addIncident(db, 'cardmem', { kind: 'manual_remediation', severity: 'high', triggerRef: 'manual:cardmem', relayRequestedAt: NOW });
 
     const pending = pendingRemediations(db);
     expect(pending.length).toBe(1);
@@ -127,18 +128,18 @@ describe('F010 remediation relay (pull feed)', () => {
     expect(pending[0]!.issue.title).toContain('pushed by hand');
   });
 
-  it('excludes: opt-in off, below severity, probe_down, and projects with no repo', () => {
+  it('only manual_remediation relays — auto error_spike / agent_failure_spike / probe_down never do', () => {
     const db = freshDb();
-    addProject(db, 'optout', { remediationRelay: false, repo: 'optout' });
-    addProject(db, 'norepo', { remediationRelay: true }); // no repo
     addProject(db, 'on', { remediationRelay: true, repo: 'on' });
-    for (const p of ['optout', 'norepo', 'on']) addIssue(db, `iss_${p}`, p);
-    addIncident(db, 'optout', { triggerRef: 'iss_optout' }); // opt-in off
-    addIncident(db, 'norepo', { triggerRef: 'iss_norepo' }); // no repo
-    addIncident(db, 'on', { severity: 'medium', triggerRef: 'iss_on' }); // below 'high'
-    addIncident(db, 'on', { kind: 'probe_down', triggerRef: 'iss_on' }); // infra, not relayed
-
+    addIssue(db, 'iss_e', 'on');
+    // auto-relay removed 2026-06-04: auto-detected kinds + infra never enter the feed
+    addIncident(db, 'on', { kind: 'error_spike', triggerRef: 'iss_e', relayRequestedAt: null });
+    addIncident(db, 'on', { kind: 'agent_failure_spike', triggerRef: 'iss_e', relayRequestedAt: null });
+    addIncident(db, 'on', { kind: 'probe_down', triggerRef: 'iss_e', relayRequestedAt: null });
     expect(pendingRemediations(db).length).toBe(0);
+    // a deliberate manual push on the SAME project IS relayed
+    addIncident(db, 'on', { kind: 'manual_remediation', triggerRef: 'iss_e', relayRequestedAt: NOW });
+    expect(pendingRemediations(db).length).toBe(1);
   });
 
   it('claim marks the incident, drops it from the feed, and is idempotent', () => {
@@ -173,22 +174,9 @@ describe('F010 remediation relay (pull feed)', () => {
 });
 
 describe('F010.5 self-service enrollment', () => {
-  it('per-project severity override lets a medium spike through (global gate is high)', () => {
-    const db = freshDb();
-    // opted in + repo set, but lowered the gate to medium for this project
-    addProject(db, 'low-gate', { remediationRelay: true, repo: 'low-gate', remediationRelaySeverity: 'medium' });
-    addIssue(db, 'iss_lg', 'low-gate');
-    addIncident(db, 'low-gate', { triggerRef: 'iss_lg', severity: 'medium' });
-    expect(pendingRemediations(db).length).toBe(1); // medium ≥ medium → relayed
-  });
-
-  it('null severity inherits the global gate (high) → a medium spike is excluded', () => {
-    const db = freshDb();
-    addProject(db, 'def', { remediationRelay: true, repo: 'def' }); // remediationRelaySeverity = null
-    addIssue(db, 'iss_def', 'def');
-    addIncident(db, 'def', { triggerRef: 'iss_def', severity: 'medium' });
-    expect(pendingRemediations(db).length).toBe(0); // medium < high → excluded
-  });
+  // NOTE: the per-project severity GATE only ever applied to AUTO error_spike
+  // relaying, which was removed 2026-06-04 (only manual relays now). The
+  // enrollment helpers below still exist (repo/github_repo routing + the field).
 
   it('enrollmentView exposes enabled/repo/severity + effective_severity', () => {
     const db = freshDb();
