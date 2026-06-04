@@ -27,6 +27,7 @@ interface Incident {
   relayRequestedAt: string | null;
   relayClaimedAt: string | null;
   relaySession: string | null;
+  cardmemPushedAt: string | null;
 }
 interface Detail {
   incident: Incident;
@@ -175,6 +176,9 @@ function IncidentDetail({ id, onClose, onChanged }: { id: string; onClose: () =>
                 <div class="text-[var(--warn)]">Queued for relay · {fmtRel(data.incident.relayRequestedAt)} — awaiting a cc session</div>
               ) : (
                 <div class="text-[var(--muted)]">Not queued for relay.</div>
+              )}
+              {data.incident.cardmemPushedAt && (
+                <div style={{ color: 'var(--ok)' }}>Pushed to cardmem Inbox · {fmtRel(data.incident.cardmemPushedAt)}</div>
               )}
               {ra && (
                 <>
