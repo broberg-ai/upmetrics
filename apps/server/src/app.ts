@@ -11,6 +11,7 @@ import { registerDashboardRoutes } from './dashboard/routes';
 import { registerCostRoutes } from './cost/routes';
 import { registerRemediationRoutes } from './incidents/relay';
 import { registerIssueRoutes } from './issues/routes';
+import { registerLensRoutes } from './auth/lens';
 import { captureSelf } from './dogfood';
 
 export function createApp() {
@@ -24,6 +25,7 @@ export function createApp() {
   registerCostRoutes(app); // F014 — per-project cost read-API
   registerRemediationRoutes(app); // F010 — auto-remediation pull-feed
   registerIssueRoutes(app); // F010.7 — self-service issue list + resolve (project key)
+  registerLensRoutes(app); // F016 — Lens mint-endpoint (read-only visual-verification session)
 
   app.get('/health', (c) =>
     c.json({ status: 'ok', service: '@upmetrics/server', ts: Date.now() }),

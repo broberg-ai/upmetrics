@@ -1,7 +1,7 @@
 {
   "project": "upmetrics",
   "base_url": "https://upmetrics.org",
-  "auth": { "adapter": "storageState", "statePath": ".lens/storage-state.json" },
+  "auth": { "adapter": "mintEndpoint", "url": "https://upmetrics.org/api/lens-session", "secretPath": ".lens/mint-secret" },
   "surfaces": [
     { "name": "overview", "path": "/", "mode": "element", "selector": "[data-testid=\"overview-root\"]", "waitFor": "[data-testid=\"overview-root\"]", "no_diff": true, "assert": "return { pass: document.querySelector('[data-testid=\"overview-root\"]').innerText.includes('Health across all projects') }" },
     { "name": "issues", "path": "/issues", "mode": "element", "selector": "[data-testid=\"issues-root\"]", "waitFor": "[data-testid=\"issues-root\"]", "no_diff": true },
