@@ -69,7 +69,7 @@ function NewProject({ onClose }: { onClose: () => void }) {
   return (
     <Modal open onClose={onClose} title={created ? `Project “${created.project.id}” created` : 'New project'}>
       {created ? (
-        <div class="space-y-3 text-sm">
+        <div data-testid="new-project-created" class="space-y-3 text-sm">
           <p class="text-[var(--muted)]">Copy these into the repo. The API key is a secret — store it as the repo's <code>UPMETRICS_API_KEY</code> (Fly secret / .env). You can re-reveal it later on the project page.</p>
           <CredField label="DSN → UPMETRICS_DSN" value={created.dsn} />
           <CredField label="API key → UPMETRICS_API_KEY" value={created.api_key} />
@@ -82,11 +82,11 @@ function NewProject({ onClose }: { onClose: () => void }) {
         <div class="space-y-3">
           <label class="block">
             <span class="text-sm font-medium">Name</span>
-            <input value={name} onInput={(e) => setName((e.target as HTMLInputElement).value)} placeholder="Acme Corp" class={input} style={{ background: 'var(--bg)', borderColor: 'var(--border)' }} />
+            <input data-testid="new-project-name" value={name} onInput={(e) => setName((e.target as HTMLInputElement).value)} placeholder="Acme Corp" class={input} style={{ background: 'var(--bg)', borderColor: 'var(--border)' }} />
           </label>
           <label class="block">
             <span class="text-sm font-medium">Slug (project id)</span>
-            <input value={idRaw} onInput={(e) => setIdRaw((e.target as HTMLInputElement).value)} placeholder={slug || 'acme-corp'} class={input} style={{ background: 'var(--bg)', borderColor: 'var(--border)' }} />
+            <input data-testid="new-project-slug" value={idRaw} onInput={(e) => setIdRaw((e.target as HTMLInputElement).value)} placeholder={slug || 'acme-corp'} class={input} style={{ background: 'var(--bg)', borderColor: 'var(--border)' }} />
             <span class="mt-1 block text-xs text-[var(--muted)]">lowercase [a-z0-9-]; used in the DSN + as the project id{slug ? ` → "${slug}"` : ''}.</span>
           </label>
           <div>
@@ -95,7 +95,7 @@ function NewProject({ onClose }: { onClose: () => void }) {
           </div>
           <div class="flex justify-end gap-2 pt-1">
             <Button variant="outline" onClick={onClose}>Cancel</Button>
-            <Button variant="primary" loading={busy} disabled={!slug} onClick={create}>Create</Button>
+            <Button variant="primary" data-testid="new-project-create" loading={busy} disabled={!slug} onClick={create}>Create</Button>
           </div>
         </div>
       )}
@@ -143,7 +143,7 @@ export function Overview() {
       <PageHeader
         title="Overview"
         subtitle="Health across all projects"
-        right={<Button onClick={() => setNewOpen(true)}><Plus size={14} /> New project</Button>}
+        right={<Button data-testid="new-project-btn" onClick={() => setNewOpen(true)}><Plus size={14} /> New project</Button>}
       />
       {newOpen && <NewProject onClose={() => setNewOpen(false)} />}
       {loading ? (

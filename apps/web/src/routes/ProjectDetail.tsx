@@ -220,7 +220,7 @@ function Credentials({ id, initial }: { id: string; initial: { dsn: string; api_
   };
 
   return (
-    <Card>
+    <Card data-testid="credentials-card">
       <div class="mb-1 text-sm font-medium">Credentials</div>
       <div class="mb-4 text-xs text-[var(--muted)]">
         <b>DSN</b> = error/RUM capture (public, safe client-side). <b>API key</b> = <code>X-Upmetrics-Key</code> for cost, issues + enrollment — a secret; store it in the repo's <code>.env</code> / Fly secret as <code>UPMETRICS_API_KEY</code>.
@@ -237,11 +237,11 @@ function Credentials({ id, initial }: { id: string; initial: { dsn: string; api_
           <div class="mb-1 flex items-center justify-between gap-2">
             <span class="text-sm font-medium">API key</span>
             <div class="flex items-center gap-2">
-              <button type="button" onClick={() => setRevealed((r) => !r)} class={btn} style={{ borderColor: 'var(--border)' }}>
+              <button type="button" data-testid="cred-reveal-btn" onClick={() => setRevealed((r) => !r)} class={btn} style={{ borderColor: 'var(--border)' }}>
                 {revealed ? <EyeOff size={12} /> : <Eye size={12} />} {revealed ? 'Hide' : 'Reveal'}
               </button>
               <CopyBtn value={key} label="API key" />
-              <button type="button" onClick={() => setConfirm(true)} class={btn} style={{ borderColor: 'var(--border)', color: 'var(--down)' }}>
+              <button type="button" data-testid="cred-rotate-btn" onClick={() => setConfirm(true)} class={btn} style={{ borderColor: 'var(--border)', color: 'var(--down)' }}>
                 Rotate
               </button>
             </div>
