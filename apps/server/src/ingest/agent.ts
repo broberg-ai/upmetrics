@@ -50,6 +50,10 @@ const bodySchema = z.object({
   response_excerpt: z.string().nullish(),
   error_issue_id: z.string().nullish(),
   tags: z.record(z.string(), z.unknown()).nullish(),
+  // Optional caller dedup key (record mode): re-posting the same key UPSERTs the
+  // existing row in place instead of inserting a duplicate. Lets a daily cost
+  // pusher re-send a growing aggregate without double-counting.
+  idempotency_key: z.string().nullish(),
 });
 type ParsedBody = z.infer<typeof bodySchema>;
 const KNOWN_KEYS = new Set(Object.keys(bodySchema.shape));
@@ -155,27 +159,41 @@ export function registerAgentRoutes(app: Hono): void {
     }
     const startedAt = b.started_at != null ? new Date(b.started_at) : now;
     const endedAt = b.ended_at != null ? new Date(b.ended_at) : now;
+    const common = {
+      sessionId: b.session_id ?? null,
+      parentRunId: b.parent_run_id ?? null,
+      agentKind: b.agent_kind,
+      agentName: b.agent_name,
+      task: b.task ?? '',
+      purpose: b.purpose ?? null,
+      provider: b.provider,
+      model: b.model,
+      tier: b.tier ?? null,
+      status: b.status ?? 'success',
+      startedAt,
+      endedAt,
+      durationMs: b.duration_ms ?? endedAt.getTime() - startedAt.getTime(),
+      ...metrics(b, tags),
+    };
+
+    // Idempotent upsert: a repeated (project, idempotency_key) updates the row in
+    // place, so a re-pushed growing daily aggregate never double-counts.
+    if (b.idempotency_key) {
+      const existing = db
+        .select({ id: schema.agentRuns.id })
+        .from(schema.agentRuns)
+        .where(and(eq(schema.agentRuns.projectId, project.id), eq(schema.agentRuns.idempotencyKey, b.idempotency_key)))
+        .get();
+      if (existing) {
+        db.update(schema.agentRuns).set(common).where(eq(schema.agentRuns.id, existing.id)).run();
+        return c.json({ run_id: existing.id, upserted: true });
+      }
+    }
+
     const id = crypto.randomUUID();
     db.insert(schema.agentRuns)
-      .values({
-        id,
-        projectId: project.id,
-        sessionId: b.session_id ?? null,
-        parentRunId: b.parent_run_id ?? null,
-        agentKind: b.agent_kind,
-        agentName: b.agent_name,
-        task: b.task ?? '',
-        purpose: b.purpose ?? null,
-        provider: b.provider,
-        model: b.model,
-        tier: b.tier ?? null,
-        status: b.status ?? 'success',
-        startedAt,
-        endedAt,
-        durationMs: b.duration_ms ?? endedAt.getTime() - startedAt.getTime(),
-        ...metrics(b, tags),
-      })
+      .values({ id, projectId: project.id, idempotencyKey: b.idempotency_key ?? null, ...common })
       .run();
-    return c.json({ run_id: id });
+    return c.json({ run_id: id, upserted: false });
   });
 }

@@ -111,11 +111,18 @@ export const agentRuns = sqliteTable(
     responseExcerpt: text('response_excerpt'), // opt-in; null for compliance projects
     errorIssueId: text('error_issue_id').references(() => issues.id),
     tags: text('tags', { mode: 'json' }),
+    // Optional caller-supplied dedup key (e.g. "buddy:2026-06-03:brain:opus").
+    // Lets an external pusher re-send a growing daily aggregate as an UPSERT
+    // instead of inserting duplicate rows. NULL for normal per-run telemetry —
+    // SQLite treats NULLs as distinct, so the unique index below never collides
+    // existing runs.
+    idempotencyKey: text('idempotency_key'),
   },
   (t) => [
     index('agent_runs_project_idx').on(t.projectId),
     index('agent_runs_session_idx').on(t.sessionId),
     index('agent_runs_name_idx').on(t.agentName),
+    uniqueIndex('agent_runs_idem_idx').on(t.projectId, t.idempotencyKey),
   ],
 );
 

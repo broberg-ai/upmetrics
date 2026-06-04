@@ -56,8 +56,29 @@ Required: `agent_kind`, `agent_name`, `provider`, `model`. Optional `started_at`
 → { "mode":"record", "agent_kind":"chatbot", "agent_name":"eir",
     "provider":"anthropic", "model":"claude", "status":"success",
     "input_tokens":50, "output_tokens":80, "cost_usd":0.001 }
-← { "run_id": "<uuid>" }
+← { "run_id": "<uuid>", "upserted": false }
 ```
+
+**Idempotent re-push (`idempotency_key`).** Pass an optional `idempotency_key`
+on a `record` to make the write an UPSERT: a repeated `(project, idempotency_key)`
+updates the existing row in place instead of inserting a duplicate. This lets an
+external pusher re-send a *growing* daily aggregate (e.g. live cost so far today)
+without double-counting. The response carries `upserted: true` on an update,
+`false` on a fresh insert. Omit the key for normal per-run telemetry — NULL keys
+are distinct, so unkeyed runs never collide.
+
+```json
+→ { "mode":"record", "agent_kind":"cc", "agent_name":"buddy",
+    "provider":"anthropic", "model":"claude-opus-4-8",
+    "input_tokens":120000, "output_tokens":18000, "cost_usd":1.84,
+    "started_at":"2026-06-03T00:00:00Z", "ended_at":"2026-06-03T23:59:59Z",
+    "tags":{"source":"brain"}, "idempotency_key":"buddy:2026-06-03:brain:opus" }
+← { "run_id": "<uuid>", "upserted": true }   // on a same-key re-push
+```
+
+Convention for per-source/day/model breakdown: one keyed cell per
+`day × source × model` (e.g. `buddy:<YYYY-MM-DD>:<source>:<model>`), with the
+`source` mirrored into `tags` so the cost dashboard can `?groupBy=source`.
 
 ## Metric fields (finish / record)
 

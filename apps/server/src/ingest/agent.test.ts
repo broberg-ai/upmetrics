@@ -102,3 +102,44 @@ describe('POST /api/agent — validation posture', () => {
     expect(row.outputTokens).toBe(180);
   });
 });
+
+describe('POST /api/agent — idempotency_key upsert (daily cost re-push)', () => {
+  const KEY1 = 'buddy:2026-06-03:brain:opus';
+  const rowsForKey = (k: string) =>
+    getDb().select().from(schema.agentRuns).where(eq(schema.agentRuns.idempotencyKey, k)).all();
+
+  it('first push with idempotency_key inserts (upserted:false)', async () => {
+    const res = await post({ ...base, idempotency_key: KEY1, input_tokens: 100, cost_usd: 1.0 });
+    expect(res.status).toBe(200);
+    const b = (await res.json()) as { run_id: string; upserted: boolean };
+    expect(b.upserted).toBe(false);
+    const rows = rowsForKey(KEY1);
+    expect(rows.length).toBe(1);
+    expect(rows[0]!.costUsd).toBeCloseTo(1.0);
+  });
+
+  it('re-push of the SAME key updates in place — no duplicate row, values replaced (upserted:true)', async () => {
+    const res = await post({ ...base, idempotency_key: KEY1, input_tokens: 250, cost_usd: 2.5 });
+    expect(res.status).toBe(200);
+    const b = (await res.json()) as { run_id: string; upserted: boolean };
+    expect(b.upserted).toBe(true);
+    const rows = rowsForKey(KEY1);
+    expect(rows.length).toBe(1); // still ONE — no double-count
+    expect(rows[0]!.costUsd).toBeCloseTo(2.5); // grown aggregate replaced in place
+    expect(rows[0]!.inputTokens).toBe(250);
+  });
+
+  it('a different key inserts a separate row (per day×source×model cell)', async () => {
+    const KEY2 = 'buddy:2026-06-03:review:haiku';
+    const res = await post({ ...base, idempotency_key: KEY2, cost_usd: 0.3 });
+    expect((await body(res)).run_id).toBeTruthy();
+    expect(rowsForKey(KEY2).length).toBe(1);
+    expect(rowsForKey(KEY1).length).toBe(1); // untouched
+  });
+
+  it('no idempotency_key still inserts normally (NULLs are distinct — no collision)', async () => {
+    const a = await post({ ...base, cost_usd: 0.1 });
+    const b = await post({ ...base, cost_usd: 0.2 });
+    expect((await body(a)).run_id).not.toBe((await body(b)).run_id); // two distinct rows
+  });
+});
