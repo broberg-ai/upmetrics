@@ -1,7 +1,107 @@
+import { useState } from 'preact/hooks';
+import { Plus } from 'lucide-preact';
 import { useApi } from '../lib/useApi';
+import { api } from '../lib/api';
 import { usd } from '../lib/format';
-import { Card, Badge, StatusDot } from '../components/ui/controls';
+import { Card, Badge, StatusDot, Button } from '../components/ui/controls';
+import { CustomSelect } from '../components/ui/select';
+import { Modal } from '../components/ui/modal';
+import { useToast } from '../components/ui/toast';
 import { Loading, ErrorBox, Empty, PageHeader } from '../components/PageState';
+
+const PLATFORMS = [
+  { value: 'web', label: 'Web' },
+  { value: 'node', label: 'Node' },
+  { value: 'capacitor', label: 'Capacitor' },
+  { value: 'native', label: 'Native' },
+];
+
+function CredField({ label, value }: { label: string; value: string }) {
+  const toast = useToast();
+  return (
+    <div>
+      <div class="mb-1 flex items-center justify-between gap-2">
+        <span class="text-xs font-medium text-[var(--muted)]">{label}</span>
+        <button
+          type="button"
+          onClick={async () => {
+            try { await navigator.clipboard.writeText(value); toast('Copied', 'success'); } catch { toast('Copy failed', 'error'); }
+          }}
+          class="rounded-md border px-2 py-0.5 text-xs transition hover:bg-[var(--surface-2)] active:scale-95"
+          style={{ borderColor: 'var(--border)' }}
+        >
+          Copy
+        </button>
+      </div>
+      <code class="block break-all rounded-md border px-3 py-1.5 text-xs" style={{ background: 'var(--bg)', borderColor: 'var(--border)' }}>{value}</code>
+    </div>
+  );
+}
+
+// F015 — create a project ("customer") from the UI. On success the key is shown
+// ONCE for copying into the repo's secret.
+function NewProject({ onClose }: { onClose: () => void }) {
+  const toast = useToast();
+  const [name, setName] = useState('');
+  const [idRaw, setIdRaw] = useState('');
+  const [platform, setPlatform] = useState('web');
+  const [busy, setBusy] = useState(false);
+  const [created, setCreated] = useState<{ project: { id: string }; dsn: string; api_key: string } | null>(null);
+  const slug = (idRaw || name).trim().toLowerCase().replace(/[^a-z0-9-]+/g, '-').replace(/^-+|-+$/g, '');
+  const input = 'mt-1 w-full rounded-md border px-3 py-1.5 text-sm focus:outline-none focus-visible:ring-2 focus-visible:ring-[var(--primary)]';
+
+  const create = async () => {
+    setBusy(true);
+    try {
+      const r = await api<{ project: { id: string }; dsn: string; api_key: string }>('/dashboard/projects', {
+        method: 'POST',
+        body: JSON.stringify({ id: slug, name: name.trim() || slug, platform }),
+      });
+      setCreated(r);
+      toast('Project created', 'success');
+    } catch (e) {
+      toast(e instanceof Error ? e.message : 'Create failed', 'error');
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <Modal open onClose={onClose} title={created ? `Project “${created.project.id}” created` : 'New project'}>
+      {created ? (
+        <div class="space-y-3 text-sm">
+          <p class="text-[var(--muted)]">Copy these into the repo. The API key is a secret — store it as the repo's <code>UPMETRICS_API_KEY</code> (Fly secret / .env). You can re-reveal it later on the project page.</p>
+          <CredField label="DSN → UPMETRICS_DSN" value={created.dsn} />
+          <CredField label="API key → UPMETRICS_API_KEY" value={created.api_key} />
+          <div class="flex justify-end gap-2 pt-1">
+            <a href={`/projects/${created.project.id}`} class="inline-flex items-center rounded-md border px-3 py-1.5 text-sm transition hover:bg-[var(--surface-2)]" style={{ borderColor: 'var(--border)' }}>Go to project</a>
+            <Button variant="primary" onClick={onClose}>Done</Button>
+          </div>
+        </div>
+      ) : (
+        <div class="space-y-3">
+          <label class="block">
+            <span class="text-sm font-medium">Name</span>
+            <input value={name} onInput={(e) => setName((e.target as HTMLInputElement).value)} placeholder="Acme Corp" class={input} style={{ background: 'var(--bg)', borderColor: 'var(--border)' }} />
+          </label>
+          <label class="block">
+            <span class="text-sm font-medium">Slug (project id)</span>
+            <input value={idRaw} onInput={(e) => setIdRaw((e.target as HTMLInputElement).value)} placeholder={slug || 'acme-corp'} class={input} style={{ background: 'var(--bg)', borderColor: 'var(--border)' }} />
+            <span class="mt-1 block text-xs text-[var(--muted)]">lowercase [a-z0-9-]; used in the DSN + as the project id{slug ? ` → "${slug}"` : ''}.</span>
+          </label>
+          <div>
+            <span class="text-sm font-medium">Platform</span>
+            <div class="mt-1"><CustomSelect value={platform} options={PLATFORMS} onChange={setPlatform} /></div>
+          </div>
+          <div class="flex justify-end gap-2 pt-1">
+            <Button variant="outline" onClick={onClose}>Cancel</Button>
+            <Button variant="primary" loading={busy} disabled={!slug} onClick={create}>Create</Button>
+          </div>
+        </div>
+      )}
+    </Modal>
+  );
+}
 
 interface Proj {
   id: string;
@@ -36,10 +136,16 @@ function Metric({ label, value, tone }: { label: string; value: string | number;
 
 export function Overview() {
   const { loading, data, error } = useApi<OverviewData>('/dashboard/overview');
+  const [newOpen, setNewOpen] = useState(false);
 
   return (
     <div data-testid="overview-root">
-      <PageHeader title="Overview" subtitle="Health across all projects" />
+      <PageHeader
+        title="Overview"
+        subtitle="Health across all projects"
+        right={<Button onClick={() => setNewOpen(true)}><Plus size={14} /> New project</Button>}
+      />
+      {newOpen && <NewProject onClose={() => setNewOpen(false)} />}
       {loading ? (
         <Loading />
       ) : error ? (

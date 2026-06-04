@@ -1,9 +1,10 @@
 import { useState } from 'preact/hooks';
-import { ChevronDown, ChevronRight, ArrowLeft } from 'lucide-preact';
+import { ChevronDown, ChevronRight, ArrowLeft, Copy, Check, Eye, EyeOff } from 'lucide-preact';
 import { useApi } from '../lib/useApi';
 import { api } from '../lib/api';
 import { Card, Badge, StatusDot, Spinner, Button, Toggle } from '../components/ui/controls';
 import { CustomSelect } from '../components/ui/select';
+import { Modal } from '../components/ui/modal';
 import { useToast } from '../components/ui/toast';
 import { Loading, ErrorBox, PageHeader } from '../components/PageState';
 import { fmtRel, fmtDate, usd } from '../lib/format';
@@ -33,6 +34,7 @@ interface Detail {
   latest_sdk_version: string | null;
   components: Component[];
   remediation: Enrollment;
+  credentials: { dsn: string; api_key: string };
 }
 interface CompError {
   event_id: string;
@@ -165,6 +167,107 @@ function RemediationSettings({ id, initial }: { id: string; initial: Enrollment 
   );
 }
 
+function CopyBtn({ value, label }: { value: string; label: string }) {
+  const toast = useToast();
+  const [done, setDone] = useState(false);
+  return (
+    <button
+      type="button"
+      onClick={async () => {
+        try {
+          await navigator.clipboard.writeText(value);
+          setDone(true);
+          toast(`${label} copied`, 'success');
+          setTimeout(() => setDone(false), 1500);
+        } catch {
+          toast('Copy failed', 'error');
+        }
+      }}
+      class="inline-flex items-center gap-1 rounded-md border px-2 py-1 text-xs transition hover:bg-[var(--surface-2)] active:scale-95"
+      style={{ borderColor: 'var(--border)' }}
+      title={`Copy ${label}`}
+    >
+      {done ? <Check size={12} /> : <Copy size={12} />} {done ? 'Copied' : 'Copy'}
+    </button>
+  );
+}
+
+// F015 — DSN (public, error/RUM) + api_key (secret, the X-Upmetrics-Key for
+// cost/issues/enrollment). Reveal/copy/rotate. Session-authed page, so the secret
+// is safe to reveal to the logged-in operator.
+function Credentials({ id, initial }: { id: string; initial: { dsn: string; api_key: string } }) {
+  const toast = useToast();
+  const [key, setKey] = useState(initial.api_key);
+  const [revealed, setRevealed] = useState(false);
+  const [confirm, setConfirm] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const masked = `${key.slice(0, 7)}${'•'.repeat(16)}`;
+  const btn = 'inline-flex items-center gap-1 rounded-md border px-2 py-1 text-xs transition hover:bg-[var(--surface-2)] active:scale-95';
+
+  const rotate = async () => {
+    setBusy(true);
+    try {
+      const r = await api<{ api_key: string }>(`/dashboard/projects/${id}/rotate-key`, { method: 'POST' });
+      setKey(r.api_key);
+      setRevealed(true);
+      setConfirm(false);
+      toast('API key rotated — update the repo secret', 'success');
+    } catch (e) {
+      toast(e instanceof Error ? e.message : 'Rotate failed', 'error');
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <Card>
+      <div class="mb-1 text-sm font-medium">Credentials</div>
+      <div class="mb-4 text-xs text-[var(--muted)]">
+        <b>DSN</b> = error/RUM capture (public, safe client-side). <b>API key</b> = <code>X-Upmetrics-Key</code> for cost, issues + enrollment — a secret; store it in the repo's <code>.env</code> / Fly secret as <code>UPMETRICS_API_KEY</code>.
+      </div>
+      <div class="space-y-3">
+        <div>
+          <div class="mb-1 flex items-center justify-between gap-2">
+            <span class="text-sm font-medium">DSN</span>
+            <CopyBtn value={initial.dsn} label="DSN" />
+          </div>
+          <code class="block break-all rounded-md border px-3 py-1.5 text-xs text-[var(--muted)]" style={{ background: 'var(--bg)', borderColor: 'var(--border)' }}>{initial.dsn}</code>
+        </div>
+        <div>
+          <div class="mb-1 flex items-center justify-between gap-2">
+            <span class="text-sm font-medium">API key</span>
+            <div class="flex items-center gap-2">
+              <button type="button" onClick={() => setRevealed((r) => !r)} class={btn} style={{ borderColor: 'var(--border)' }}>
+                {revealed ? <EyeOff size={12} /> : <Eye size={12} />} {revealed ? 'Hide' : 'Reveal'}
+              </button>
+              <CopyBtn value={key} label="API key" />
+              <button type="button" onClick={() => setConfirm(true)} class={btn} style={{ borderColor: 'var(--border)', color: 'var(--down)' }}>
+                Rotate
+              </button>
+            </div>
+          </div>
+          <code class="block break-all rounded-md border px-3 py-1.5 text-xs" style={{ background: 'var(--bg)', borderColor: 'var(--border)' }}>{revealed ? key : masked}</code>
+        </div>
+      </div>
+      {confirm && (
+        <Modal open onClose={() => setConfirm(false)} title="Rotate API key?">
+          <p class="text-sm text-[var(--muted)]">
+            The current key stops working immediately. Update the repo's <code>UPMETRICS_API_KEY</code> secret with the new value right after.
+          </p>
+          <div class="mt-4 flex justify-end gap-2">
+            <Button variant="outline" onClick={() => setConfirm(false)}>
+              Cancel
+            </Button>
+            <Button variant="danger" loading={busy} onClick={rotate}>
+              Rotate key
+            </Button>
+          </div>
+        </Modal>
+      )}
+    </Card>
+  );
+}
+
 export function ProjectDetail({ id }: { id?: string }) {
   const { loading, data, error } = useApi<Detail>(`/dashboard/projects/${id}`);
   const [open, setOpen] = useState<string | null>(null);
@@ -241,6 +344,8 @@ export function ProjectDetail({ id }: { id?: string }) {
           </Card>
 
           <RemediationSettings id={data.project.id} initial={data.remediation} />
+
+          <Credentials id={data.project.id} initial={data.credentials} />
         </div>
       )}
     </div>

@@ -8,6 +8,15 @@ import { auth } from '../auth';
 import { deleteProbeJob, setProbeJobEnabled, updateProbeJob } from '../probes/cronjobs';
 import { dispatchRemediation } from '../incidents/remediation';
 import { pendingRemediations, enrollmentView, buildEnrollmentPatch, applyEnrollment } from '../incidents/relay';
+import { config } from '../config';
+import { randomBytes } from 'node:crypto';
+
+// F015 — credential generators. DSN host derives from authBaseUrl (single source,
+// never hardcoded). DSN public key = 16-byte hex (matches the ingest contract:
+// envelope checks extractPublicKey(dsn) === incoming key). api_key = uk_<24B hex>.
+export const genApiKey = () => `uk_${randomBytes(24).toString('hex')}`;
+export const buildDsn = (id: string) => `https://${randomBytes(16).toString('hex')}@${new URL(config.authBaseUrl).host}/${id}`;
+export const SLUG_RE = /^[a-z0-9][a-z0-9-]{1,38}$/;
 
 async function requireUser(c: Context): Promise<boolean> {
   const session = await auth.api.getSession({ headers: c.req.raw.headers });
@@ -142,7 +151,36 @@ export function registerDashboardRoutes(app: Hono): void {
       latest_sdk_version: latestSdkVersion,
       components,
       remediation: enrollmentView(project), // F010.5 — current enrollment for the settings card
+      credentials: { dsn: project.dsn, api_key: project.apiKey }, // F015 — session-authed reveal
     });
+  });
+
+  // F015 — create a new project ("customer"): generates DSN + api_key. Session auth.
+  app.post('/api/dashboard/projects', async (c) => {
+    if (!(await requireUser(c))) return c.json({ error: 'unauthorized' }, 401);
+    const db = getDb();
+    const body = (await c.req.json().catch(() => ({}))) as { id?: string; name?: string; platform?: string };
+    const id = String(body.id ?? '').trim().toLowerCase();
+    if (!SLUG_RE.test(id)) return c.json({ error: 'invalid_slug', message: 'id must be [a-z0-9-], 2–39 chars' }, 400);
+    if (db.select().from(schema.projects).where(eq(schema.projects.id, id)).get()) return c.json({ error: 'slug_taken' }, 409);
+    const name = String(body.name ?? '').trim() || id;
+    const platform = ['web', 'node', 'capacitor', 'native'].includes(String(body.platform)) ? String(body.platform) : 'web';
+    const dsn = buildDsn(id);
+    const apiKey = genApiKey();
+    const now = new Date();
+    db.insert(schema.projects).values({ id, name, dsn, apiKey, platform, createdAt: now, updatedAt: now }).run();
+    return c.json({ project: { id, name, platform }, dsn, api_key: apiKey }, 201);
+  });
+
+  // F015 — rotate a project's api_key (old key stops authenticating). Session auth.
+  app.post('/api/dashboard/projects/:id/rotate-key', async (c) => {
+    if (!(await requireUser(c))) return c.json({ error: 'unauthorized' }, 401);
+    const db = getDb();
+    const id = c.req.param('id');
+    if (!db.select().from(schema.projects).where(eq(schema.projects.id, id)).get()) return c.json({ error: 'not_found' }, 404);
+    const apiKey = genApiKey();
+    db.update(schema.projects).set({ apiKey, updatedAt: new Date() }).where(eq(schema.projects.id, id)).run();
+    return c.json({ ok: true, api_key: apiKey });
   });
 
   // F010.5 — update a project's remediation enrollment from the dashboard
