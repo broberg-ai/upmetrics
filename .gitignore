@@ -73,6 +73,9 @@ web_modules/
 # MCP server config — contains plaintext API keys.
 # Copy from .mcp.json.example and paste your own pa_<64hex> key.
 .mcp.json
+# Backups of secret-bearing files must never be committed (.mcp.json.bak holds
+# the live cardmem Bearer key). The tracked, redacted template is .mcp.json.example.
+*.bak
 
 # parcel-bundler cache (https://parceljs.org/)
 .cache
