@@ -6,12 +6,23 @@
 // (trail pitfall #3). USD is source-of-truth — clients do their own FX.
 // metered: a run is "free" when transport=subprocess OR cost_usd=0 (Max-Plan).
 import type { Context, Hono } from 'hono';
+import { timingSafeEqual } from 'node:crypto';
 import { eq, sql } from 'drizzle-orm';
 import { getDb, schema } from '../db';
+import { config } from '../config';
 
 type Db = ReturnType<typeof getDb>;
 
-const WINDOW_MS: Record<string, number> = { day: 86_400_000, week: 604_800_000, month: 2_592_000_000 };
+const WINDOW_MS: Record<string, number> = {
+  day: 86_400_000,
+  week: 604_800_000,
+  month: 2_592_000_000,
+  // friendly aliases so callers can pass 1d/24h/7d/30d (buddy's fleet digest uses 1d)
+  '1d': 86_400_000,
+  '24h': 86_400_000,
+  '7d': 604_800_000,
+  '30d': 2_592_000_000,
+};
 const MICRO = 1_000_000;
 const microUsd = (usd: unknown): number => Math.round(Number(usd ?? 0) * MICRO);
 
@@ -154,6 +165,53 @@ export function costTimeseries(db: Db, projectId: string, q: Record<string, stri
   };
 }
 
+// Cross-project per-agent cost for the org-wide fleet digest (buddy's daily
+// Discord report). NO project filter — aggregates every project's runs by
+// agent_name over the window. Default window = 1 day (the digest is "yesterday").
+// Per-agent micro_usd rounds at each agent boundary; the fleet total rounds once
+// from the raw SUM (round-once-at-boundary, trail pitfall #3).
+export function costFleet(db: Db, q: Record<string, string | undefined>, now: number) {
+  const { fromMs, toMs } = resolveWindow({ ...q, window: q.window ?? 'day' }, now);
+  const span = sql`started_at >= ${fromMs} AND started_at < ${toMs}`;
+  const rows = db.all(sql`
+    SELECT agent_name AS agent_name, COUNT(*) AS run_count,
+      COALESCE(SUM(cost_usd), 0) AS cost_usd,
+      COALESCE(SUM(CASE WHEN ${FREE} THEN 0 ELSE cost_usd END), 0) AS metered_cost_usd,
+      COALESCE(SUM(CASE WHEN ${FREE} THEN 1 ELSE 0 END), 0) AS free_run_count
+    FROM agent_runs WHERE ${span} GROUP BY agent_name ORDER BY cost_usd DESC
+  `) as Array<{ agent_name: string; run_count: number; cost_usd: number; metered_cost_usd: number; free_run_count: number }>;
+  const total = (db.all(sql`
+    SELECT COALESCE(SUM(cost_usd), 0) AS cost_usd, COUNT(*) AS run_count
+    FROM agent_runs WHERE ${span}
+  `) as Array<{ cost_usd: number; run_count: number }>)[0] ?? { cost_usd: 0, run_count: 0 };
+  return {
+    generated_at: new Date(now).toISOString(),
+    window: { from: new Date(fromMs).toISOString(), to: new Date(toMs).toISOString() },
+    total_usd: Number(total.cost_usd),
+    total_micro_usd: microUsd(total.cost_usd),
+    run_count: Number(total.run_count),
+    by_agent: rows.map((r) => ({
+      agent_name: r.agent_name,
+      runs: Number(r.run_count),
+      cost_usd: Number(r.cost_usd),
+      micro_usd: microUsd(r.cost_usd),
+      metered_micro_usd: microUsd(r.metered_cost_usd),
+      free_runs: Number(r.free_run_count),
+    })),
+  };
+}
+
+// Org read-token check (timing-safe). Distinct header from the project key so a
+// project api_key can never accidentally satisfy a cross-project read.
+function fleetAuthed(c: Context): boolean {
+  const key = c.req.header('x-upmetrics-fleet-key');
+  const expected = config.fleetReadKey;
+  if (!key || !expected) return false;
+  const a = Buffer.from(key);
+  const b = Buffer.from(expected);
+  return a.length === b.length && timingSafeEqual(a, b);
+}
+
 export function registerCostRoutes(app: Hono): void {
   app.get('/api/cost/summary', (c) => {
     const project = projectFromKey(c);
@@ -165,5 +223,10 @@ export function registerCostRoutes(app: Hono): void {
     const project = projectFromKey(c);
     if (!project) return c.json({ error: 'invalid_api_key' }, 401);
     return c.json(costTimeseries(getDb(), project.id, c.req.query(), Date.now()));
+  });
+
+  app.get('/api/cost/fleet', (c) => {
+    if (!fleetAuthed(c)) return c.json({ error: 'invalid_fleet_key' }, 401);
+    return c.json(costFleet(getDb(), c.req.query(), Date.now()));
   });
 }

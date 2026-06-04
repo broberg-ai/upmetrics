@@ -23,6 +23,10 @@ export const config = {
   // Probes (F004): cronjobs.webhouse.net is the scheduler/trigger.
   cronjobsApiBase: process.env.CRONJOBS_API_BASE ?? 'https://cronjobs.webhouse.net',
   cronjobsApiToken: process.env.CRONJOBS_API_TOKEN ?? '',
+  // Org-level read-only cost token (GET /api/cost/fleet — cross-project per-agent
+  // aggregates for buddy's daily fleet-cost digest). Read-only, cost-only, no PII.
+  // Empty → the fleet endpoint is disabled (401). Single source: Fly secret.
+  fleetReadKey: process.env.FLEET_READ_KEY ?? '',
   // Incident correlation (F005.1).
   correlationIntervalMs: int('CORRELATION_INTERVAL_MS', 30_000),
   spikeWindowMs: int('SPIKE_WINDOW_MS', 300_000), // 5 min

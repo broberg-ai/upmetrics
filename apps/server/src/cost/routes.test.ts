@@ -1,10 +1,12 @@
 // F014 cost read-API. Run: bun test src/cost/routes.test.ts
 process.env.DATABASE_PATH = ':memory:';
+process.env.FLEET_READ_KEY = 'fleet_test_key'; // org read-token for /api/cost/fleet (read before config loads)
 
 import { describe, it, expect, beforeAll } from 'bun:test';
 import { Hono } from 'hono';
 import { migrate } from 'drizzle-orm/bun-sqlite/migrator';
 import { getDb, schema } from '../db';
+import { config } from '../config';
 import { registerCostRoutes } from './routes';
 
 const MIGRATIONS = new URL('../db/migrations', import.meta.url).pathname;
@@ -13,6 +15,9 @@ const MULTI_KEY = 'uk_multi';
 const app = new Hono();
 
 beforeAll(() => {
+  // config reads env at import (before this file's top-level runs, ESM hoisting),
+  // so set the org read-token here at runtime instead of via process.env.
+  (config as { fleetReadKey: string }).fleetReadKey = 'fleet_test_key';
   const db = getDb();
   migrate(db, { migrationsFolder: MIGRATIONS });
   db.insert(schema.projects)
@@ -47,11 +52,22 @@ beforeAll(() => {
   run({ projectId: 'multi', costUsd: 0.02, tags: { capability: 'chat', transport: 'http', tenantId: 'sanne' } });
   run({ projectId: 'multi', costUsd: 0.04, tags: { capability: 'chat', transport: 'http', tenantId: 'bob' } });
 
+  // Fleet runs on a separate project with DISTINCT agent_names — proves
+  // /api/cost/fleet aggregates per-agent ACROSS projects (no project scope).
+  db.insert(schema.projects)
+    .values({ id: 'fleettest', name: 'Fleet', dsn: 'https://k@upmetrics.org/fleettest', apiKey: 'uk_fleet', platform: 'node', retentionDays: 30, agentRetentionDays: 90, createdAt: new Date(), updatedAt: new Date() })
+    .run();
+  run({ projectId: 'fleettest', agentName: 'buddy', costUsd: 3.0, tags: { transport: 'http' } });
+  run({ projectId: 'fleettest', agentName: 'trail', costUsd: 1.5, tags: { transport: 'http' } });
+
   registerCostRoutes(app);
 });
 
 function get(path: string, key: string | null = KEY) {
   return app.request(path, { headers: key ? { 'x-upmetrics-key': key } : {} });
+}
+function getFleet(path: string, fleetKey: string | null = 'fleet_test_key') {
+  return app.request(path, { headers: fleetKey ? { 'x-upmetrics-fleet-key': fleetKey } : {} });
 }
 const json = (r: Response) => r.json() as Promise<any>;
 
@@ -125,5 +141,37 @@ describe('GET /api/cost/timeseries', () => {
     expect(b.points.length).toBe(1); // all seeded today → one day bucket
     expect(b.points[0].micro_usd).toBe(7000);
     expect(b.points[0].run_count).toBe(3);
+  });
+});
+
+describe('GET /api/cost/fleet (org read-token, cross-project per-agent)', () => {
+  it('401 without the fleet key', async () => {
+    expect((await getFleet('/api/cost/fleet', null)).status).toBe(401);
+  });
+
+  it('401 with a wrong fleet key (and a project key does NOT satisfy it)', async () => {
+    expect((await getFleet('/api/cost/fleet', 'nope')).status).toBe(401);
+    // a valid PROJECT key in the project header must not authorize the org endpoint
+    expect((await app.request('/api/cost/fleet', { headers: { 'x-upmetrics-key': KEY } })).status).toBe(401);
+  });
+
+  it('aggregates per agent ACROSS projects with the org key', async () => {
+    const r = await getFleet('/api/cost/fleet?window=1d');
+    expect(r.status).toBe(200);
+    const b = await json(r);
+    const byAgent = Object.fromEntries(b.by_agent.map((a: any) => [a.agent_name, a]));
+    // distinct agents from the fleettest project surface (cross-project read)
+    expect(byAgent.buddy.micro_usd).toBe(3_000_000);
+    expect(byAgent.buddy.runs).toBe(1);
+    expect(byAgent.trail.micro_usd).toBe(1_500_000);
+    // the org total spans every project (incl. the 9.99 'other' run) — proves no scope
+    expect(b.total_micro_usd).toBeGreaterThanOrEqual(3_000_000 + 1_500_000 + 9_990_000);
+    expect(b.total_usd).toBeGreaterThan(14);
+  });
+
+  it('1d window alias resolves (≈24h span)', async () => {
+    const b = await json(await getFleet('/api/cost/fleet?window=1d'));
+    const span = new Date(b.window.to).getTime() - new Date(b.window.from).getTime();
+    expect(span).toBe(86_400_000);
   });
 });

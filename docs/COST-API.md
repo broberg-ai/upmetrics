@@ -109,10 +109,45 @@ curl -s https://upmetrics.org/api/cost/summary?window=month \
   -H "X-Upmetrics-Key: $UPMETRICS_API_KEY" | jq '.total_micro_usd / 1000000'
 ```
 
+## Fleet read — `GET /api/cost/fleet` (org-wide, per-agent)
+
+Cross-project per-agent cost for an org-level digest (buddy's daily Discord
+"fleet cost" report). Unlike the project-scoped endpoints above, this aggregates
+**every** project's runs by `agent_name`.
+
+**Auth is different**: a dedicated org read-token in header
+`X-Upmetrics-Fleet-Key` (NOT a project `uk_` key — a project key never satisfies
+this endpoint). Read-only, cost-aggregates only (no PII/excerpts). The token is a
+server secret (`FLEET_READ_KEY`); empty → endpoint returns 401 (disabled).
+
+Query: `?window=1d|24h|7d|30d|day|week|month` (default `1d`) or explicit
+`?from=&to=` (ISO-8601 or epoch-ms).
+
+```bash
+curl -s "https://upmetrics.org/api/cost/fleet?window=1d" \
+  -H "X-Upmetrics-Fleet-Key: $UPMETRICS_FLEET_READ_KEY"
+```
+```json
+{
+  "generated_at": "2026-06-05T06:00:00Z",
+  "window": { "from": "2026-06-04T06:00:00Z", "to": "2026-06-05T06:00:00Z" },
+  "total_usd": 8.17, "total_micro_usd": 8170000, "run_count": 142,
+  "by_agent": [
+    { "agent_name": "trail", "runs": 53, "cost_usd": 4.97, "micro_usd": 4970000, "metered_micro_usd": 4970000, "free_runs": 0 },
+    { "agent_name": "buddy", "runs": 61, "cost_usd": 3.13, "micro_usd": 3130000, "metered_micro_usd": 3130000, "free_runs": 0 }
+  ]
+}
+```
+
+Money: `cost_usd` (float, for display) + `micro_usd` (integer, for reconciliation,
+`$1 = 1_000_000`). Per-agent rounds at each agent boundary; `total_micro_usd`
+rounds once from the raw SUM.
+
 ## Notes / limits
 
 - Read-only. Ingest stays `POST /api/agent` ([AGENT-SCHEMA.md](AGENT-SCHEMA.md)).
 - No server-side cache in v1 (queries are cheap over indexed `agent_runs`); use
   `generated_at` to cache client-side.
-- v1 reuses the ingest `api_key`. A separate read-only key may come later for surfaces
-  that embed cost in a public/client view — don't expose the write-capable ingest key there.
+- Project endpoints reuse the ingest `api_key` (`X-Upmetrics-Key`). The fleet
+  endpoint uses a SEPARATE org read-token (`X-Upmetrics-Fleet-Key`) — cross-project
+  read is a deliberately distinct credential, never the write-capable ingest key.
