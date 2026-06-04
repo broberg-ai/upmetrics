@@ -65,4 +65,22 @@ describe('POST /api/issues/:id/resolve', () => {
   });
 });
 
+describe('POST /api/issues/resolve-all (clear slate)', () => {
+  it('resolves all open issues for the caller project only', async () => {
+    const db = getDb();
+    const now = new Date();
+    const seed = (id: string, projectId: string) =>
+      db.insert(schema.issues).values({ id, projectId, fingerprint: `fp_${id}`, title: `flood ${id}`, culprit: 'x', level: 'error', status: 'unresolved', firstSeen: now, lastSeen: now, eventCount: 99 }).run();
+    seed('ra1', 'isr_trail');
+    seed('ra2', 'isr_trail');
+    seed('ra_other', 'isr_other'); // another project — must be untouched
+
+    const r = await json(await req('/api/issues/resolve-all', KEY, { method: 'POST', body: '{}' }));
+    expect(r.resolved).toBe(2); // only isr_trail's two fresh open (earlier ones already resolved/ignored)
+    expect(r.status).toBe('resolved');
+    expect(db.select().from(schema.issues).where(eq(schema.issues.id, 'ra1')).get()!.status).toBe('resolved');
+    expect(db.select().from(schema.issues).where(eq(schema.issues.id, 'ra_other')).get()!.status).toBe('unresolved'); // scoped
+  });
+});
+
 import { eq } from 'drizzle-orm';

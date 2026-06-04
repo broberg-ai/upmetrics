@@ -61,4 +61,20 @@ export function registerIssueRoutes(app: Hono): void {
     db.update(schema.issues).set({ status }).where(eq(schema.issues.id, id)).run();
     return c.json({ ok: true, id, status });
   });
+
+  // Clear slate — resolve (or ignore) ALL of YOUR currently-open issues in one
+  // call. For the mass-noise case (e.g. a dev reload-storm that floods the board)
+  // where looping per-id is impractical. Body { status?: 'resolved' | 'ignored' },
+  // default 'resolved'. Scoped to the caller's project; one bulk UPDATE.
+  app.post('/api/issues/resolve-all', async (c) => {
+    const project = projectFromKey(c);
+    if (!project) return c.json({ error: 'invalid_api_key' }, 401);
+    const db = getDb();
+    const body = (await c.req.json().catch(() => ({}))) as { status?: string };
+    const status = body.status === 'ignored' ? 'ignored' : 'resolved';
+    const where = and(eq(schema.issues.projectId, project.id), eq(schema.issues.status, 'unresolved'));
+    const resolved = db.select({ id: schema.issues.id }).from(schema.issues).where(where).all().length;
+    db.update(schema.issues).set({ status }).where(where).run();
+    return c.json({ ok: true, project: project.id, resolved, status });
+  });
 }
