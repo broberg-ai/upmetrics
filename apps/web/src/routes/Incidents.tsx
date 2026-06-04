@@ -127,8 +127,8 @@ function IncidentDetail({ id, onClose, onChanged }: { id: string; onClose: () =>
     try {
       await api(`/dashboard/incidents/${id}/status`, { method: 'POST', body: JSON.stringify({ status }) });
       toast(`Incident ${status}`, 'success');
-      reload();
       onChanged();
+      onClose(); // done — close so the action can't be re-fired (stacked toasts)
     } catch {
       toast('Action failed', 'error');
     } finally {
