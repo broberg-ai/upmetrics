@@ -45,7 +45,10 @@ function mintStorageState(now: number) {
       {
         name: LENS_COOKIE,
         value: sign(expMs),
-        domain: new URL(config.authBaseUrl).hostname,
+        // Leading-dot domain: Playwright's context.addCookies (the mintEndpoint
+        // adapter path) needs it to send the cookie back; a host-only domain works
+        // via storageState-at-context-creation but not via addCookies.
+        domain: `.${new URL(config.authBaseUrl).hostname}`,
         path: '/',
         httpOnly: true,
         secure: true,

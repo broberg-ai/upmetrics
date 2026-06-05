@@ -50,7 +50,7 @@ describe('POST /api/lens-session', () => {
     expect(b.cookies.length).toBe(1);
     const ck = b.cookies[0];
     expect(ck.name).toBe(LENS_COOKIE);
-    expect(ck.domain).toBe('upmetrics.org');
+    expect(ck.domain).toBe('.upmetrics.org'); // leading-dot for Playwright addCookies
     expect(ck.path).toBe('/');
     expect(ck.httpOnly).toBe(true);
     expect(ck.secure).toBe(true);
