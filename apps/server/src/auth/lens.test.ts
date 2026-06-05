@@ -1,76 +1,55 @@
 // F016 Lens mint-endpoint. Run: bun test src/auth/lens.test.ts
-// config reads env at import (ESM hoisting), so set secrets before importing.
+// The 200 mint path creates a real Better Auth session (user/session tables that
+// `better-auth migrate` makes, NOT drizzle) — so the full mint is proven on prod
+// (curl /api/auth/get-session + Lens). Here: the Bearer gate + the cookie-signing
+// format (deterministic, no DB).
 process.env.DATABASE_PATH = ':memory:';
-process.env.LENS_MINT_SECRET = 'mint_test_secret';
-process.env.AUTH_SECRET = 'auth_test_secret';
-process.env.AUTH_BASE_URL = 'https://upmetrics.org';
 
 import { describe, it, expect } from 'bun:test';
 import { Hono } from 'hono';
-import type { Context } from 'hono';
+import { createHmac } from 'node:crypto';
 import { config } from '../config';
-import { registerLensRoutes, validLensSession, LENS_COOKIE } from './lens';
+import { registerLensRoutes, signSessionCookie, LENS_EMAIL } from './lens';
 
-// config snapshots env at import (before this file's top-level runs, ESM
-// hoisting) — set the values the routes read at request time here.
-Object.assign(config as Record<string, unknown>, {
-  lensMintSecret: 'mint_test_secret',
-  authSecret: 'auth_test_secret',
-  authBaseUrl: 'https://upmetrics.org',
-});
+(config as Record<string, unknown>).lensMintSecret = 'mint_test_secret';
 
 const app = new Hono();
 registerLensRoutes(app);
 
 function mint(authHeader?: string) {
-  return app.request('/api/lens-session', {
-    method: 'POST',
-    headers: authHeader ? { authorization: authHeader } : {},
-  });
+  return app.request('/api/lens-session', { method: 'POST', headers: authHeader ? { authorization: authHeader } : {} });
 }
 
-// Build a minimal Context-like object carrying a cookie header, for validLensSession.
-function ctxWithCookie(cookie: string | null): Context {
-  const headers = new Headers();
-  if (cookie) headers.set('cookie', cookie);
-  return { req: { raw: { headers }, header: (n: string) => headers.get(n) ?? undefined } } as unknown as Context;
-}
-
-describe('POST /api/lens-session', () => {
-  it('401 without / with a wrong Bearer secret', async () => {
+describe('POST /api/lens-session — Bearer gate', () => {
+  it('401 without a Bearer secret', async () => {
     expect((await mint()).status).toBe(401);
+  });
+  it('401 with the wrong Bearer secret', async () => {
     expect((await mint('Bearer nope')).status).toBe(401);
   });
+  // correct-secret path mints a real Better Auth session → needs the auth tables;
+  // proven on prod (see card F016). A wrong secret never reaches the DB.
+});
 
-  it('200 with the mint secret → Playwright storageState (cookie fields complete)', async () => {
-    const res = await mint('Bearer mint_test_secret');
-    expect(res.status).toBe(200);
-    const b = (await res.json()) as { cookies: any[]; origins: any[] };
-    expect(Array.isArray(b.origins)).toBe(true);
-    expect(b.cookies.length).toBe(1);
-    const ck = b.cookies[0];
-    expect(ck.name).toBe(LENS_COOKIE);
-    expect(ck.domain).toBe('.upmetrics.org'); // leading-dot for Playwright addCookies
-    expect(ck.path).toBe('/');
-    expect(ck.httpOnly).toBe(true);
-    expect(ck.secure).toBe(true);
-    expect(ck.sameSite).toBe('Lax');
-    expect(typeof ck.expires).toBe('number');
-    expect(ck.expires * 1000).toBeGreaterThan(Date.now()); // future
+describe('signSessionCookie — better-call signed-cookie format', () => {
+  it('produces encodeURIComponent(`token.<base64 HMAC>`), sig 44 chars ending =', () => {
+    const out = signSessionCookie('sometoken', 'secret');
+    const decoded = decodeURIComponent(out);
+    const [val, sig] = [decoded.slice(0, decoded.lastIndexOf('.')), decoded.slice(decoded.lastIndexOf('.') + 1)];
+    expect(val).toBe('sometoken');
+    const expected = createHmac('sha256', 'secret').update('sometoken').digest('base64');
+    expect(sig).toBe(expected);
+    expect(sig.length).toBe(44);
+    expect(sig.endsWith('=')).toBe(true);
+  });
+  it('is deterministic + URL-encodes base64 specials (+/=)', () => {
+    expect(signSessionCookie('t', 's')).toBe(signSessionCookie('t', 's'));
+    expect(signSessionCookie('t', 's')).not.toContain('='); // = → %3D
   });
 });
 
-describe('validLensSession', () => {
-  it('accepts a freshly minted token', async () => {
-    const b = (await (await mint('Bearer mint_test_secret')).json()) as { cookies: any[] };
-    const token = b.cookies[0].value;
-    expect(validLensSession(ctxWithCookie(`${LENS_COOKIE}=${token}`))).toBe(true);
-  });
-
-  it('rejects missing, malformed, tampered, and expired tokens', () => {
-    expect(validLensSession(ctxWithCookie(null))).toBe(false);
-    expect(validLensSession(ctxWithCookie(`${LENS_COOKIE}=garbage`))).toBe(false);
-    expect(validLensSession(ctxWithCookie(`${LENS_COOKIE}=9999999999999.deadbeef`))).toBe(false); // future exp, bad sig
-    expect(validLensSession(ctxWithCookie(`${LENS_COOKIE}=1.abc`))).toBe(false); // expired (exp=1ms)
+describe('LENS_EMAIL', () => {
+  it('is the dedicated read-only identity, never cb@/admin', () => {
+    expect(LENS_EMAIL).toBe('lens@upmetrics.org');
   });
 });

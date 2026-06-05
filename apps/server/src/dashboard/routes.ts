@@ -5,7 +5,7 @@ import type { Context, Hono } from 'hono';
 import { and, desc, eq, gte, isNotNull, lte, or, sql } from 'drizzle-orm';
 import { getDb, schema } from '../db';
 import { auth } from '../auth';
-import { validLensSession } from '../auth/lens';
+import { LENS_EMAIL } from '../auth/lens';
 import { deleteProbeJob, setProbeJobEnabled, updateProbeJob } from '../probes/cronjobs';
 import { dispatchRemediation } from '../incidents/remediation';
 import { pendingRemediations, enrollmentView, buildEnrollmentPatch, applyEnrollment } from '../incidents/relay';
@@ -21,12 +21,11 @@ export const SLUG_RE = /^[a-z0-9][a-z0-9-]{1,38}$/;
 
 async function requireUser(c: Context): Promise<boolean> {
   const session = await auth.api.getSession({ headers: c.req.raw.headers });
-  if (session?.user) return true;
-  // F016 — Lens read-only principal: a valid mint cookie authorizes GET (render)
-  // only. It can never pass a mutating method, so the lens session is
-  // structurally read-only (POST/PATCH/DELETE → 401). Never cb@/admin.
-  if (c.req.method === 'GET' && validLensSession(c)) return true;
-  return false;
+  if (!session?.user) return false;
+  // F016 — the dedicated lens user (minted read-only session) may render the
+  // dashboard but mutate nothing: deny it any non-GET method (→ 401).
+  if (session.user.email === LENS_EMAIL && c.req.method !== 'GET') return false;
+  return true;
 }
 
 function startOfToday(): Date {
