@@ -34,13 +34,9 @@ export function usd(n: number): string {
 // USD, so a fixed rate is fine — bump this ONE constant if it drifts too far.
 export const USD_TO_DKK = 6.9;
 
-// DKK companion to usd(): "56 kr". Mirrors usd()'s adaptive precision so a
-// sub-øre fleet cost doesn't collapse to "0 kr".
+// DKK companion to usd(): "DKK 120,00". Prefix (like usd's "$") for consistency,
+// Danish formatting — period thousands + comma decimal, always 2 decimals.
 export function dkk(n: number): string {
   const v = (n ?? 0) * USD_TO_DKK;
-  if (v === 0) return '0 kr';
-  if (v >= 100) return `${Math.round(v).toLocaleString('da-DK')} kr`;
-  if (v >= 1) return `${v.toFixed(0)} kr`;
-  if (v >= 0.01) return `${v.toFixed(2)} kr`;
-  return `${v.toPrecision(2).replace(/0+$/, '').replace(/\.$/, '')} kr`;
+  return `DKK ${v.toLocaleString('da-DK', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 }
