@@ -39,11 +39,12 @@ async function mintStorageState(now: number) {
   const ia = ctx.internalAdapter;
   const existing = await ia.findUserByEmail(LENS_EMAIL);
   const userId = existing?.user?.id ?? (await ia.createUser({ email: LENS_EMAIL, name: 'Lens (read-only)', emailVerified: true })).id;
+  // Clear the lens user's prior sessions before minting a fresh one, so lens
+  // sessions never accumulate. (The row keeps better-auth's rolling ~7d TTL —
+  // getSession auto-refreshes expiry, so tightening it is futile — but only ONE
+  // ever exists, and the cookie we hand out expires in 10 min regardless.)
+  await ia.deleteSessions(userId);
   const session = await ia.createSession(userId, false);
-  // createSession ignores an expiry override → the row defaults to the global
-  // session TTL (~7d). Tighten it to the lens TTL so the DB row matches the
-  // 10-min cookie and stale lens sessions don't accumulate (cardmem pattern).
-  await ia.updateSession(session.token, { expiresAt: new Date(now + TTL_MS) });
   const name = ctx.authCookies?.sessionToken?.name ?? '__Secure-better-auth.session_token';
   return {
     cookies: [
