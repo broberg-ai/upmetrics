@@ -39,12 +39,11 @@ async function mintStorageState(now: number) {
   const ia = ctx.internalAdapter;
   const existing = await ia.findUserByEmail(LENS_EMAIL);
   const userId = existing?.user?.id ?? (await ia.createUser({ email: LENS_EMAIL, name: 'Lens (read-only)', emailVerified: true })).id;
-  // Clear the lens user's prior sessions before minting a fresh one, so lens
-  // sessions never accumulate. (The row keeps better-auth's rolling ~7d TTL —
-  // getSession auto-refreshes expiry, so tightening it is futile — but only ONE
-  // ever exists, and the cookie we hand out expires in 10 min regardless.)
-  await ia.deleteSessions(userId);
   const session = await ia.createSession(userId, false);
+  // Note: the session row keeps better-auth's rolling ~7d TTL (getSession
+  // auto-refreshes expiry, so a shorter override/update is futile). Harmless:
+  // the cookie we hand out expires in 10 min, and the row is read-only +
+  // mint-gated. (deleteSessions-before-create broke auth, so we don't prune here.)
   const name = ctx.authCookies?.sessionToken?.name ?? '__Secure-better-auth.session_token';
   return {
     cookies: [
