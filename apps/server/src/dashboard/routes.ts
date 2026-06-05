@@ -9,6 +9,7 @@ import { LENS_EMAIL } from '../auth/lens';
 import { deleteProbeJob, setProbeJobEnabled, updateProbeJob } from '../probes/cronjobs';
 import { dispatchRemediation } from '../incidents/remediation';
 import { pendingRemediations, enrollmentView, buildEnrollmentPatch, applyEnrollment } from '../incidents/relay';
+import { costSummary } from '../cost/routes';
 import { config } from '../config';
 import { randomBytes } from 'node:crypto';
 
@@ -405,6 +406,16 @@ export function registerDashboardRoutes(app: Hono): void {
 
   // Aggregates answering the §8 use cases (cost/day, per-agent, success rate,
   // p95/long-running). Computed in JS over the last 14 days — low volume.
+  // F017 — operator cost breakdown by a tag dimension (e.g. tenantId). Reuses the
+  // F014 costSummary aggregation; session-authed so it's operator-scoped (the whole
+  // dashboard is admin-login-only — no tenant-curator access, no cross-tenant leak).
+  app.get('/api/dashboard/cost', async (c) => {
+    if (!(await requireUser(c))) return c.json({ error: 'unauthorized' }, 401);
+    const project = c.req.query('project');
+    if (!project) return c.json({ error: 'project_required' }, 400);
+    return c.json(costSummary(getDb(), project, c.req.query(), Date.now()));
+  });
+
   app.get('/api/dashboard/agents/aggregates', async (c) => {
     if (!(await requireUser(c))) return c.json({ error: 'unauthorized' }, 401);
     const db = getDb();

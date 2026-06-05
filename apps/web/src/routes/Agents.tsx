@@ -52,6 +52,59 @@ function Stat({ label, value, tone }: { label: string; value: string | number; t
   );
 }
 
+interface Breakdown {
+  group_by?: string;
+  by_group?: { key: string; micro_usd: number; run_count: number }[];
+}
+const GROUP_DIMS = [
+  { value: 'tenantId', label: 'tenant' },
+  { value: 'kbId', label: 'knowledge base' },
+];
+
+// F017 — operator cost breakdown by a tag dimension (tenant/kb). Mounted only when
+// a project is selected (costSummary is project-scoped). The whole dashboard is
+// admin-login-only, so this is inherently operator-scoped — no cross-tenant leak.
+function CostByGroup({ project }: { project: string }) {
+  const [groupBy, setGroupBy] = useState('tenantId');
+  const data = useApi<Breakdown>(`/dashboard/cost?project=${project}&groupBy=${groupBy}&window=week`);
+  const rows = data.data?.by_group ?? [];
+  const label = GROUP_DIMS.find((d) => d.value === groupBy)?.label ?? groupBy;
+  return (
+    <Card class="overflow-x-auto" data-testid="cost-by-group">
+      <div class="mb-3 flex items-center justify-between gap-2">
+        <div class="text-sm font-medium">Cost by {label} (7d)</div>
+        <CustomSelect value={groupBy} options={GROUP_DIMS.map((d) => ({ value: d.value, label: d.label }))} onChange={(v) => setGroupBy(v || 'tenantId')} />
+      </div>
+      {data.loading ? (
+        <Loading />
+      ) : data.error ? (
+        <ErrorBox msg={data.error} />
+      ) : rows.length === 0 ? (
+        <Empty msg="No tagged cost in this window." />
+      ) : (
+        <table class="w-full text-sm">
+          <thead class="text-left text-xs text-[var(--muted)]">
+            <tr>
+              <th class="pb-2 font-medium capitalize">{label}</th>
+              <th class="pb-2 font-medium">Runs</th>
+              <th class="pb-2 font-medium">Cost</th>
+            </tr>
+          </thead>
+          <tbody>
+            {rows.map((r) => (
+              <tr key={r.key} class="border-t" style={{ borderColor: 'var(--border)' }}>
+                <td class="py-2">{r.key}</td>
+                <td class="py-2">{r.run_count}</td>
+                <td class="py-2">{usd(r.micro_usd / 1_000_000)}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      )}
+    </Card>
+  );
+}
+
 export function Agents() {
   const projects = useApi<{ projects: { id: string; name: string }[] }>('/dashboard/projects');
   const [project, setProject] = useState<string | null>(null);
@@ -153,6 +206,11 @@ export function Agents() {
               </tbody>
             </table>
           </Card>
+
+          {/* F017 — operator cost breakdown by tag dimension (tenant/kb). Project-scoped. */}
+          {project ? <CostByGroup project={project} /> : (
+            <Card><div class="text-sm text-[var(--muted)]">Select a project to break cost down by tenant.</div></Card>
+          )}
         </div>
       ) : null}
 
