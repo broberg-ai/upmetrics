@@ -39,7 +39,17 @@ interface Aggregates {
 
 const FAIL = new Set(['error', 'timeout', 'max_turns', 'abandoned']);
 const statusTone = (s: string) => (FAIL.has(s) ? 'down' : s === 'running' ? 'primary' : 'ok');
-const ms = (n: number | null) => (n == null ? '—' : n < 1000 ? `${n}ms` : `${(n / 1000).toFixed(1)}s`);
+// Dynamic duration: ms under 1s, seconds under a minute, then "Xm Ys" / "Xh Ym"
+// so a large second-count (e.g. 125000ms) reads as "2m 5s" not "125.0s" (F018).
+const ms = (n: number | null) => {
+  if (n == null) return '—';
+  if (n < 1000) return `${n}ms`;
+  const s = Math.round(n / 1000);
+  if (s < 60) return `${(n / 1000).toFixed(1)}s`;
+  const m = Math.floor(s / 60);
+  if (m < 60) return `${m}m ${s % 60}s`;
+  return `${Math.floor(m / 60)}h ${m % 60}m`;
+};
 
 function Stat({ label, value, tone }: { label: string; value: string | number; tone?: 'ok' | 'warn' | 'down' }) {
   return (
