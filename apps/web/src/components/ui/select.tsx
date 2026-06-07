@@ -12,11 +12,13 @@ export function CustomSelect({
   options,
   onChange,
   placeholder = 'Vælg…',
+  testid,
 }: {
   value: string | null;
   options: Option[];
   onChange: (v: string) => void;
   placeholder?: string;
+  testid?: string;
 }) {
   const [open, setOpen] = useState(false);
   const ref = useRef<HTMLDivElement>(null);
@@ -32,6 +34,7 @@ export function CustomSelect({
   return (
     <div ref={ref} class="relative min-w-36">
       <button
+        data-testid={testid}
         onClick={() => setOpen((o) => !o)}
         class="flex w-full items-center justify-between gap-2 rounded-md border px-3 py-1.5 text-sm hover:bg-[var(--surface-2)] active:scale-[0.99]"
         style={{ borderColor: 'var(--border)' }}

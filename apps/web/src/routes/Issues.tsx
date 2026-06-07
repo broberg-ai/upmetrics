@@ -55,12 +55,17 @@ export function Issues() {
   const [project, setProject] = useState<string | null>(query?.project ?? null);
   const projName = new Map((projects.data?.projects ?? []).map((p) => [p.id, p.name]));
   const [status, setStatus] = useState<string | null>('unresolved');
+  const [server, setServer] = useState<string | null>(null);
   const [q, setQ] = useState('');
   const [sel, setSel] = useState<string | null>(null);
+
+  // F006.6 — server tag values for the per-server filter (project-scoped when set).
+  const servers = useApi<{ values: string[] }>(`/dashboard/issue-tag-values?key=server${project ? `&project=${project}` : ''}`);
 
   const qs = new URLSearchParams();
   if (project) qs.set('project', project);
   if (status) qs.set('status', status);
+  if (server) qs.set('tag.server', server);
   if (q.trim()) qs.set('q', q.trim());
   const list = useApi<{ issues: Issue[] }>(`/dashboard/issues?${qs.toString()}`);
 
@@ -78,6 +83,14 @@ export function Issues() {
       <div class="mb-4 flex flex-wrap items-center gap-2">
         <CustomSelect value={project ?? ''} options={projectOpts} onChange={(v) => setProject(v || null)} />
         <CustomSelect value={status ?? ''} options={statusOpts} onChange={(v) => setStatus(v || null)} />
+        {(servers.data?.values?.length ?? 0) > 0 && (
+          <CustomSelect
+            testid="issues-server-filter"
+            value={server ?? ''}
+            options={[{ value: '', label: 'All servers' }, ...servers.data!.values.map((s) => ({ value: s, label: s }))]}
+            onChange={(v) => setServer(v || null)}
+          />
+        )}
         <input
           value={q}
           onInput={(e) => setQ((e.target as HTMLInputElement).value)}

@@ -19,6 +19,8 @@ import { randomBytes } from 'node:crypto';
 export const genApiKey = () => `uk_${randomBytes(24).toString('hex')}`;
 export const buildDsn = (id: string) => `https://${randomBytes(16).toString('hex')}@${new URL(config.authBaseUrl).host}/${id}`;
 export const SLUG_RE = /^[a-z0-9][a-z0-9-]{1,38}$/;
+// F006.6 — identifier-only tag key keeps the json_extract path bind injection-safe.
+const TAG_KEY_RE = /^[A-Za-z_][A-Za-z0-9_]*$/;
 
 async function requireUser(c: Context): Promise<boolean> {
   const session = await auth.api.getSession({ headers: c.req.raw.headers });
@@ -272,9 +274,35 @@ export function registerDashboardRoutes(app: Hono): void {
     if (project) conds.push(eq(schema.issues.projectId, project));
     if (status) conds.push(eq(schema.issues.status, status));
     if (q) conds.push(sql`lower(${schema.issues.title}) like ${'%' + q.toLowerCase() + '%'}`);
+    // F006.6 — filter by event tag (e.g. ?tag.server=trail-engine-001). Issues group
+    // by fingerprint, so the same error from server-001 + -002 is ONE issue;
+    // events.tags is authoritative → match issues with ≥1 event carrying the tag.
+    for (const [k, v] of Object.entries(c.req.query())) {
+      if (!k.startsWith('tag.') || !v) continue;
+      const key = k.slice(4);
+      if (!TAG_KEY_RE.test(key)) continue;
+      conds.push(sql`EXISTS (SELECT 1 FROM events WHERE events.issue_id = ${schema.issues.id} AND json_extract(events.tags, ${'$.' + key}) = ${v})`);
+    }
     const base = db.select().from(schema.issues);
     const rows = (conds.length ? base.where(and(...conds)) : base).orderBy(desc(schema.issues.lastSeen)).limit(200).all();
     return c.json({ issues: rows });
+  });
+
+  // F006.6 — distinct values of an event tag key (e.g. server) for a filter dropdown.
+  // Project-scoped when ?project is given. Identifier-only key keeps the json-path safe.
+  app.get('/api/dashboard/issue-tag-values', async (c) => {
+    if (!(await requireUser(c))) return c.json({ error: 'unauthorized' }, 401);
+    const db = getDb();
+    const key = c.req.query('key') ?? 'server';
+    if (!TAG_KEY_RE.test(key)) return c.json({ key, values: [] });
+    const project = c.req.query('project');
+    const path = '$.' + key;
+    const rows = db.all(
+      project
+        ? sql`SELECT DISTINCT json_extract(tags, ${path}) AS v FROM events WHERE project_id = ${project} AND json_extract(tags, ${path}) IS NOT NULL ORDER BY v LIMIT 100`
+        : sql`SELECT DISTINCT json_extract(tags, ${path}) AS v FROM events WHERE json_extract(tags, ${path}) IS NOT NULL ORDER BY v LIMIT 100`,
+    ) as Array<{ v: string }>;
+    return c.json({ key, values: rows.map((r) => r.v) });
   });
 
   // Issue detail — issue + recent events (stack/breadcrumbs/tags) + related agent runs.
