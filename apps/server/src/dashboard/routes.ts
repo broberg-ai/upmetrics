@@ -444,6 +444,34 @@ export function registerDashboardRoutes(app: Hono): void {
     return c.json(costSummary(getDb(), project, c.req.query(), Date.now()));
   });
 
+  // F019.6 — recent observed deploys for the DeployStatus card. Read-only display
+  // of deploy_events (what the execution side reported); upmetrics never deploys.
+  app.get('/api/dashboard/deploys', async (c) => {
+    if (!(await requireUser(c))) return c.json({ error: 'unauthorized' }, 401);
+    const db = getDb();
+    const rows = db
+      .select()
+      .from(schema.deployEvents)
+      .orderBy(desc(schema.deployEvents.updatedAt))
+      .limit(50)
+      .all();
+    const names = new Map(db.select({ id: schema.projects.id, name: schema.projects.name }).from(schema.projects).all().map((p) => [p.id, p.name]));
+    return c.json({
+      deploys: rows.map((r) => ({
+        id: r.id,
+        project: names.get(r.projectId) ?? r.projectId,
+        site: r.site,
+        status: r.status,
+        provider: r.provider,
+        sha: r.sha,
+        version: r.version,
+        originator: r.originator,
+        relayed: r.relayedAt != null,
+        updatedAt: r.updatedAt.toISOString(),
+      })),
+    });
+  });
+
   app.get('/api/dashboard/agents/aggregates', async (c) => {
     if (!(await requireUser(c))) return c.json({ error: 'unauthorized' }, 401);
     const db = getDb();
