@@ -237,6 +237,41 @@ export const alertHistory = sqliteTable(
   (t) => [index('alert_history_rule_idx').on(t.alertRuleId)],
 );
 
+// ── deploy_events (F019) — observed deploy/release status ────────────────────
+// The execution side (cms/whop/fysiodk) POSTs deploy status to /api/deploys with
+// its project key; upmetrics OBSERVES, it never triggers a deploy. One row per
+// deploy, upserted on (project_id, deploy_id) as status transitions
+// pending→…→success/failure. The relay (F019.7) stamps relayed_at once per
+// terminal deploy; the registry (F019.8, GET /release/:site) reads the latest
+// success per site. deploy_id NULL → always a new row (SQLite treats NULLs as
+// distinct, so anonymous deploys never collide the unique index).
+export const deployEvents = sqliteTable(
+  'deploy_events',
+  {
+    id: text('id').primaryKey(),
+    projectId: text('project_id')
+      .notNull()
+      .references(() => projects.id),
+    site: text('site').notNull(), // e.g. "sport.fdaalborg.dk"
+    deployId: text('deploy_id'), // external deploy id (upsert/idempotency key)
+    provider: text('provider'), // fly | cf-pages | gh-pages | ...
+    status: text('status').notNull(), // pending | running | success | failure
+    sha: text('sha'),
+    version: text('version'),
+    originator: text('originator'), // cc-session/repo that launched it (relay routing key)
+    // F019.7 — set once when the terminal deploy has been relayed to its
+    // originator (idempotency: 1 relay per deploy). Null = not yet relayed.
+    relayedAt: integer('relayed_at', { mode: 'timestamp_ms' }),
+    createdAt: integer('created_at', { mode: 'timestamp_ms' }).notNull(),
+    updatedAt: integer('updated_at', { mode: 'timestamp_ms' }).notNull(),
+  },
+  (t) => [
+    index('deploy_events_project_idx').on(t.projectId),
+    index('deploy_events_site_idx').on(t.site),
+    uniqueIndex('deploy_events_deploy_idx').on(t.projectId, t.deployId),
+  ],
+);
+
 // ── maintenance_windows (F008.3) ─────────────────────────────────────────────
 // A window silences matching alerts. project_id / kind NULL = wildcard (all).
 export const maintenanceWindows = sqliteTable(
