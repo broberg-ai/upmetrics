@@ -8,6 +8,7 @@ import { and, desc, eq } from 'drizzle-orm';
 import { getDb, schema } from '../db';
 
 const STATUSES = new Set(['pending', 'running', 'success', 'failure']);
+const isTerminal = (s: string) => s === 'success' || s === 'failure';
 
 function projectFromKey(c: Context) {
   const key = c.req.header('x-upmetrics-key');
@@ -51,6 +52,11 @@ export function registerDeployRoutes(app: Hono): void {
       if (b.version != null) patch.version = String(b.version);
       if (b.originator != null) patch.originator = String(b.originator);
       db.update(schema.deployEvents).set(patch).where(eq(schema.deployEvents.id, existing.id)).run();
+      // F019.7 — a terminal deploy with no originator can't be relayed (no
+      // cc-session to ping); it's excluded from the relay feed. Log for visibility.
+      if (isTerminal(b.status) && b.originator == null && existing.originator == null) {
+        console.warn(`[deploys] terminal deploy ${existing.id} (${existing.site}) has no originator — relay skipped`);
+      }
       return c.json({ id: existing.id, deduped: true, status: b.status });
     }
 
@@ -70,6 +76,9 @@ export function registerDeployRoutes(app: Hono): void {
         updatedAt: now,
       })
       .run();
+    if (isTerminal(b.status) && b.originator == null) {
+      console.warn(`[deploys] terminal deploy ${id} (${String(b.site)}) has no originator — relay skipped`);
+    }
     return c.json({ id, deduped: false, status: b.status });
   });
 

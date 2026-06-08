@@ -12,6 +12,7 @@ import { registerCostRoutes } from './cost/routes';
 import { registerRemediationRoutes } from './incidents/relay';
 import { registerIssueRoutes } from './issues/routes';
 import { registerDeployRoutes } from './deploys/routes';
+import { registerDeployRelayRoutes } from './deploys/relay';
 import { registerLensRoutes } from './auth/lens';
 import { captureSelf } from './dogfood';
 
@@ -27,6 +28,7 @@ export function createApp() {
   registerRemediationRoutes(app); // F010 — auto-remediation pull-feed
   registerIssueRoutes(app); // F010.7 — self-service issue list + resolve (project key)
   registerDeployRoutes(app); // F019 — deploy-event ingest + release registry (observe-only)
+  registerDeployRelayRoutes(app); // F019.7 — deploy-complete relay pull-feed (buddy polls, then stamps)
   registerLensRoutes(app); // F016 — Lens mint-endpoint (read-only visual-verification session)
 
   app.get('/health', (c) =>
