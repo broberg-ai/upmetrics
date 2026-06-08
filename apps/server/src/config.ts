@@ -23,6 +23,10 @@ export const config = {
   // Probes (F004): cronjobs.webhouse.net is the scheduler/trigger.
   cronjobsApiBase: process.env.CRONJOBS_API_BASE ?? 'https://cronjobs.webhouse.net',
   cronjobsApiToken: process.env.CRONJOBS_API_TOKEN ?? '',
+  // F019.2 — probe outage escalation ladder: "<consecutiveFailures>:<severity>"
+  // comma-separated. A sustained outage raises the open probe_down incident's
+  // severity as failures cross each tier (re-alerts via the alert engine).
+  probeEscalateTiers: process.env.PROBE_ESCALATE_TIERS ?? '3:high,10:critical',
   // Org-level read-only cost token (GET /api/cost/fleet — cross-project per-agent
   // aggregates for buddy's daily fleet-cost digest). Read-only, cost-only, no PII.
   // Empty → the fleet endpoint is disabled (401). Single source: Fly secret.

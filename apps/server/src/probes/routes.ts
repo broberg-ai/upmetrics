@@ -8,6 +8,7 @@ import { getDb, schema } from '../db';
 import { config } from '../config';
 import { createProbeJob, deleteProbeJob } from './cronjobs';
 import { runCheck } from './check';
+import { parseTiers, severityForFailures, escalatedSeverity } from './escalation';
 
 function projectFromKey(c: Context) {
   const key = c.req.header('x-upmetrics-key');
@@ -130,6 +131,10 @@ export function registerProbeRoutes(app: Hono): void {
         .run();
 
       if (failures >= threshold) {
+        // F019.2 — derive severity from the escalation ladder; default to 'high'
+        // (the F004 baseline) when the failure count is below the first tier.
+        const tiers = parseTiers(config.probeEscalateTiers);
+        const tierSeverity = severityForFailures(failures, tiers);
         const open = db
           .select()
           .from(schema.incidents)
@@ -148,13 +153,21 @@ export function registerProbeRoutes(app: Hono): void {
               projectId: probe.projectId,
               kind: 'probe_down',
               status: 'open',
-              severity: 'high',
+              severity: tierSeverity ?? 'high',
               title: `${probe.name} is down`,
               openedAt: now,
               triggerRef: probe.id,
               eventsAtOpen: { consecutive_failures: failures, last_error: result.error ?? null },
             })
             .run();
+        } else {
+          // F019.2 — escalate an already-open incident when a higher tier is now
+          // reached. Only ever raises; the alert engine re-fires on the higher
+          // severity (isDeduped breaks on a severity bump). Never downgrades.
+          const raised = escalatedSeverity(open.severity, tierSeverity);
+          if (raised) {
+            db.update(schema.incidents).set({ severity: raised }).where(eq(schema.incidents.id, open.id)).run();
+          }
         }
       }
     }
