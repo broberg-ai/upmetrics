@@ -20,6 +20,10 @@ export const config = {
   resendApiBase: process.env.RESEND_API_BASE ?? 'https://api.resend.com',
   // Self-monitoring (F009.1 dogfood): the server's own @upmetrics/sdk DSN.
   selfDsn: process.env.UPMETRICS_SELF_DSN ?? '',
+  // F019.4 — read-only GitHub token (classic PAT, scope repo) for the CI/deploy
+  // watcher: reads GitHub Actions workflow runs across the fleet repos. Empty →
+  // the CI watcher is disabled (the dashboard CI route returns a clear notice).
+  githubToken: process.env.GITHUB_TOKEN ?? '',
   // Probes (F004): cronjobs.webhouse.net is the scheduler/trigger.
   cronjobsApiBase: process.env.CRONJOBS_API_BASE ?? 'https://cronjobs.webhouse.net',
   cronjobsApiToken: process.env.CRONJOBS_API_TOKEN ?? '',

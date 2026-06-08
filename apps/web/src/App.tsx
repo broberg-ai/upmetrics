@@ -14,6 +14,7 @@ const Issues = lazy(() => import('./routes/Issues').then((m) => m.Issues));
 const Agents = lazy(() => import('./routes/Agents').then((m) => m.Agents));
 const Probes = lazy(() => import('./routes/Probes').then((m) => m.Probes));
 const Deploys = lazy(() => import('./routes/Deploys').then((m) => m.Deploys));
+const Ci = lazy(() => import('./routes/Ci').then((m) => m.Ci));
 const Incidents = lazy(() => import('./routes/Incidents').then((m) => m.Incidents));
 const Remediation = lazy(() => import('./routes/Remediation').then((m) => m.Remediation));
 
@@ -40,6 +41,7 @@ export function App() {
           <Route path="/agents" component={Agents} />
           <Route path="/probes" component={Probes} />
           <Route path="/deploys" component={Deploys} />
+          <Route path="/ci" component={Ci} />
           <Route path="/incidents" component={Incidents} />
           <Route path="/remediation" component={Remediation} />
           <Route default component={Overview} />
