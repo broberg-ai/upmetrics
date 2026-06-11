@@ -454,7 +454,7 @@ export function registerDashboardRoutes(app: Hono): void {
       .select()
       .from(schema.deployEvents)
       .orderBy(desc(schema.deployEvents.updatedAt))
-      .limit(50)
+      .limit(200)
       .all();
     const names = new Map(db.select({ id: schema.projects.id, name: schema.projects.name }).from(schema.projects).all().map((p) => [p.id, p.name]));
     return c.json({
