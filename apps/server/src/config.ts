@@ -32,6 +32,14 @@ export const config = {
   // watcher: reads GitHub Actions workflow runs across the fleet repos. Empty →
   // the CI watcher is disabled (the dashboard CI route returns a clear notice).
   githubToken: process.env.GITHUB_TOKEN ?? '',
+  // F019.10 — watch-only library repos: shown on /ci WITHOUT being enrolled
+  // error/cost projects (no dsn/api_key). Pure CI-observability for infra/npm libs
+  // that have no runtime (e.g. broberg-ai/ai-sdk, broberg-ai/components). Comma-sep
+  // "owner/repo". Single source; override via env. De-duped against project repos.
+  watchOnlyRepos: (process.env.WATCH_ONLY_REPOS ?? 'broberg-ai/ai-sdk,broberg-ai/components')
+    .split(',')
+    .map((s) => s.trim())
+    .filter(Boolean),
   // Probes (F004): cronjobs.webhouse.net is the scheduler/trigger.
   cronjobsApiBase: process.env.CRONJOBS_API_BASE ?? 'https://cronjobs.webhouse.net',
   cronjobsApiToken: process.env.CRONJOBS_API_TOKEN ?? '',

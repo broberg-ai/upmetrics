@@ -32,6 +32,24 @@ export function mapRun(r: Record<string, any>): CiRun {
   };
 }
 
+export interface CiTarget {
+  repo: string; // owner/repo
+  project: string; // enrolled project name, or "library" for a watch-only repo
+}
+
+// F019.10 — the repos to show on /ci: enrolled error/cost projects that carry a
+// githubRepo, UNIONed with the configured watch-only library repos (infra/npm libs
+// that have no runtime, so they're never error/cost projects). De-duped — a repo
+// already enrolled as a project keeps its project label and is not re-added as a
+// library. Pure → unit-tested.
+export function ciTargets(projectRepos: CiTarget[], watchOnly: string[]): CiTarget[] {
+  const seen = new Set(projectRepos.map((r) => r.repo.toLowerCase()));
+  const extra = watchOnly
+    .filter((repo) => repo && !seen.has(repo.toLowerCase()))
+    .map((repo) => ({ repo, project: 'library' }));
+  return [...projectRepos, ...extra];
+}
+
 const CACHE_TTL_MS = 60_000;
 const cache = new Map<string, { at: number; runs: CiRun[] }>();
 

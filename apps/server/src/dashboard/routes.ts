@@ -10,7 +10,7 @@ import { deleteProbeJob, setProbeJobEnabled, updateProbeJob } from '../probes/cr
 import { dispatchRemediation } from '../incidents/remediation';
 import { pendingRemediations, enrollmentView, buildEnrollmentPatch, applyEnrollment } from '../incidents/relay';
 import { costSummary } from '../cost/routes';
-import { fetchWorkflowRuns } from '../ci/github';
+import { fetchWorkflowRuns, ciTargets } from '../ci/github';
 import { config } from '../config';
 import { randomBytes } from 'node:crypto';
 
@@ -476,19 +476,26 @@ export function registerDashboardRoutes(app: Hono): void {
   });
 
   // F019.4/.5 — GitHub Actions CI runs per fleet repo. Observe-only: live read of
-  // workflow runs for every project that has a githubRepo. One bad repo yields a
-  // per-repo error, never a broken view. Disabled (configured:false) without a token.
+  // workflow runs for every project that has a githubRepo, UNIONed with F019.10
+  // watch-only library repos (infra/npm libs that aren't error/cost projects). One
+  // bad repo yields a per-repo error, never a broken view. Disabled without a token.
   app.get('/api/dashboard/ci', async (c) => {
     if (!(await requireUser(c))) return c.json({ error: 'unauthorized' }, 401);
     if (!config.githubToken) return c.json({ configured: false, repos: [] });
     const db = getDb();
-    const projects = db.select().from(schema.projects).all().filter((p) => p.githubRepo);
+    const projectRepos = db
+      .select()
+      .from(schema.projects)
+      .all()
+      .filter((p) => p.githubRepo)
+      .map((p) => ({ repo: p.githubRepo!, project: p.name }));
+    const targets = ciTargets(projectRepos, config.watchOnlyRepos);
     const repos = await Promise.all(
-      projects.map(async (p) => {
+      targets.map(async (t) => {
         try {
-          return { repo: p.githubRepo!, project: p.name, runs: await fetchWorkflowRuns(p.githubRepo!, 5) };
+          return { repo: t.repo, project: t.project, runs: await fetchWorkflowRuns(t.repo, 5) };
         } catch (e) {
-          return { repo: p.githubRepo!, project: p.name, runs: [], error: e instanceof Error ? e.message : String(e) };
+          return { repo: t.repo, project: t.project, runs: [], error: e instanceof Error ? e.message : String(e) };
         }
       }),
     );
