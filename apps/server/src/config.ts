@@ -96,6 +96,17 @@ export const config = {
   // never pushes (Buddy is Tailscale-local, not cloud-reachable).
   remediationRelayToken: process.env.REMEDIATION_RELAY_TOKEN ?? '',
   remediationRelaySeverity: process.env.REMEDIATION_RELAY_SEVERITY ?? 'high', // min severity to relay
+  // F019.11 — deploy push-relay. Completes F019.7 (pull-feed): now that buddycloud.cc
+  // is cloud-reachable (arn→arn), upmetrics PUSHES the deploy-complete intercom to the
+  // originating cc-session instead of waiting for buddy to poll. Token is a per-consumer
+  // Fly secret (BUDDY_CLOUD_DISPATCH_TOKEN). Empty → push disabled, the pull-feed remains.
+  buddyCloudDispatchUrl: process.env.BUDDY_CLOUD_DISPATCH_URL ?? 'https://buddycloud.cc/api/seti/v1/intercom',
+  buddyCloudDispatchToken: process.env.BUDDY_CLOUD_DISPATCH_TOKEN ?? '',
+  // Anti-storm recency bound: a deploy-complete ping is only useful immediately, so a
+  // terminal deploy older than this is SUPPRESSED (stamped relayed without pinging).
+  // Stops a backlog that accumulated while a target was offline from storming the fleet
+  // when push resumes — only fresh deploys ping. 30m default; tune via env.
+  deployRelayMaxAgeMs: int('DEPLOY_RELAY_MAX_AGE_MS', 1_800_000),
   remediationEscalateMs: int('REMEDIATION_ESCALATE_MS', 1_800_000), // unclaimed > this → escalate to Christian
   // F005.4 — push error-incidents to cardmem's Inbox as triage cards (PUSH model,
   // cardmem F067). Disabled when CARDMEM_INCIDENTS_KEY is unset. Each incident is
