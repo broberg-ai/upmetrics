@@ -468,6 +468,8 @@ export function registerDashboardRoutes(app: Hono): void {
         version: r.version,
         originator: r.originator,
         relayed: r.relayedAt != null,
+        verdict: r.regressionVerdict, // null (not yet evaluated) | healthy | regressed
+        verdictReason: (r.regressionDetail as { reason?: string } | null)?.reason ?? null,
         updatedAt: r.updatedAt.toISOString(),
       })),
     });

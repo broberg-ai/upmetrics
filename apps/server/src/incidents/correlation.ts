@@ -16,6 +16,7 @@ import { runAlertsStorm } from './storm';
 import { runRemediation } from './remediation';
 import { pushPendingToCardmem } from './cardmem-push';
 import { escalateUnclaimed } from './escalation';
+import { evaluateDeployRegressions } from '../deploys/regression';
 
 type Db = ReturnType<typeof getDb>;
 type Severity = 'critical' | 'high' | 'medium' | 'low';
@@ -208,6 +209,7 @@ export function startCorrelationWorker(): void {
     try {
       const db = getDb();
       runCorrelation(db); // F005.1 — derive/correlate incidents (sync)
+      evaluateDeployRegressions(db); // F019.9 — post-deploy health verdict + deploy_regression incidents (sync)
       void runAlertsStorm(db).catch((err) => console.error('[alerts] tick failed:', err)); // F005.2 + F008.3 storm-control
       void runRemediation(db).catch((err) => console.error('[remediation] tick failed:', err)); // F005.3 — dispatch
       void pushPendingToCardmem(db).catch((err) => console.error('[cardmem-push] tick failed:', err)); // F005.4 — Inbox cards

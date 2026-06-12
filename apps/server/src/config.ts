@@ -8,6 +8,14 @@ function int(name: string, fallback: number): number {
   return n;
 }
 
+function num(name: string, fallback: number): number {
+  const raw = process.env[name];
+  if (raw === undefined || raw === '') return fallback;
+  const n = Number(raw);
+  if (!Number.isFinite(n)) throw new Error(`env ${name} must be a number, got "${raw}"`);
+  return n;
+}
+
 export const config = {
   nodeEnv: process.env.NODE_ENV ?? 'development',
   port: int('PORT', 3017),
@@ -31,6 +39,16 @@ export const config = {
   // comma-separated. A sustained outage raises the open probe_down incident's
   // severity as failures cross each tier (re-alerts via the alert engine).
   probeEscalateTiers: process.env.PROBE_ESCALATE_TIERS ?? '3:high,10:critical',
+  // F019.9 — deploy regression detection (deploy↔error correlation). After a
+  // success deploy's observation window elapses, compare the project's error rate
+  // after the deploy vs a baseline before it; a material rise (or a brand-new
+  // issue) → "regressed". Evaluated on the correlation worker tick; observe-only.
+  deployRegressionWindowMs: int('DEPLOY_REGRESSION_WINDOW_MS', 900_000), // 15m after-window
+  deployRegressionBaselineMs: int('DEPLOY_REGRESSION_BASELINE_MS', 3_600_000), // 60m baseline
+  deployRegressionMultiplier: num('DEPLOY_REGRESSION_MULTIPLIER', 3.0), // after-rate ≥ baseline×this → flag
+  deployRegressionMinAfter: int('DEPLOY_REGRESSION_MIN_AFTER', 3), // noise floor (min after-errors)
+  deployRegressionNewIssueMin: int('DEPLOY_REGRESSION_NEW_ISSUE_MIN', 3), // new fingerprint ≥ this → flag
+  deployRegressionMaxAgeMs: int('DEPLOY_REGRESSION_MAX_AGE_MS', 21_600_000), // 6h recency bound
   // Org-level read-only cost token (GET /api/cost/fleet — cross-project per-agent
   // aggregates for buddy's daily fleet-cost digest). Read-only, cost-only, no PII.
   // Empty → the fleet endpoint is disabled (401). Single source: Fly secret.

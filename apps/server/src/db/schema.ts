@@ -262,6 +262,11 @@ export const deployEvents = sqliteTable(
     // F019.7 — set once when the terminal deploy has been relayed to its
     // originator (idempotency: 1 relay per deploy). Null = not yet relayed.
     relayedAt: integer('relayed_at', { mode: 'timestamp_ms' }),
+    // F019.9 — automatic post-deploy health verdict (deploy↔error correlation).
+    // Set once by the regression evaluator after the observation window elapses.
+    regressionVerdict: text('regression_verdict'), // null (not yet) | healthy | regressed
+    evaluatedAt: integer('evaluated_at', { mode: 'timestamp_ms' }),
+    regressionDetail: text('regression_detail', { mode: 'json' }), // {before,after,after_rate,baseline_rate,new_issues}
     createdAt: integer('created_at', { mode: 'timestamp_ms' }).notNull(),
     updatedAt: integer('updated_at', { mode: 'timestamp_ms' }).notNull(),
   },

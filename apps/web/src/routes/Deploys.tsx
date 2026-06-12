@@ -17,15 +17,24 @@ interface Deploy {
   version: string | null;
   originator: string | null;
   relayed: boolean;
+  verdict: 'healthy' | 'regressed' | null; // F019.9 — post-deploy health verdict
+  verdictReason: string | null;
   updatedAt: string;
 }
 
-type SortKey = 'site' | 'status' | 'version' | 'sha' | 'originator' | 'provider' | 'updatedAt';
+type SortKey = 'site' | 'status' | 'verdict' | 'version' | 'sha' | 'originator' | 'provider' | 'updatedAt';
 
 const tone = (s: Deploy['status']): 'ok' | 'down' | 'primary' | 'muted' =>
   s === 'success' ? 'ok' : s === 'failure' ? 'down' : s === 'running' ? 'primary' : 'muted';
 const cap = (s: string) => s.charAt(0).toUpperCase() + s.slice(1);
 const shortSha = (d: Deploy) => (d.sha ? d.sha.slice(0, 7) : '—');
+
+// F019.9 — automatic post-deploy health verdict.
+function VerdictBadge({ d }: { d: Deploy }) {
+  if (d.verdict === 'healthy') return <Badge tone="ok">Healthy</Badge>;
+  if (d.verdict === 'regressed') return <Badge tone="down">Regressed</Badge>;
+  return <span class="text-[var(--muted)]">—</span>;
+}
 
 const STATUS_OPTS = [
   { value: '', label: 'All statuses' },
@@ -113,7 +122,10 @@ export function Deploys() {
                   <Card key={d.id} data-testid="deploy-card">
                     <div class="mb-1.5 flex items-center justify-between gap-2">
                       <span class="truncate font-medium">{d.site}</span>
-                      <Badge tone={tone(d.status)}>{cap(d.status)}</Badge>
+                      <span class="flex shrink-0 items-center gap-1.5">
+                        <VerdictBadge d={d} />
+                        <Badge tone={tone(d.status)}>{cap(d.status)}</Badge>
+                      </span>
                     </div>
                     <div class="flex flex-wrap items-center gap-2 text-xs text-[var(--muted)]">
                       <span class="font-mono">{d.version ?? shortSha(d)}</span>
@@ -131,6 +143,7 @@ export function Deploys() {
                     <tr>
                       {sortHeader('site', 'Site')}
                       {sortHeader('status', 'Status')}
+                      {sortHeader('verdict', 'Health')}
                       {sortHeader('version', 'Version')}
                       {sortHeader('sha', 'Commit')}
                       {sortHeader('originator', 'Originator')}
@@ -144,6 +157,9 @@ export function Deploys() {
                         <td class="px-4 py-2 font-medium">{d.site}</td>
                         <td class="px-4 py-2">
                           <Badge tone={tone(d.status)}>{cap(d.status)}</Badge>
+                        </td>
+                        <td class="px-4 py-2" title={d.verdictReason ?? undefined}>
+                          <VerdictBadge d={d} />
                         </td>
                         <td class="px-4 py-2 text-[var(--muted)]">{d.version ?? '—'}</td>
                         <td class="px-4 py-2 font-mono text-[var(--muted)]">{shortSha(d)}</td>
