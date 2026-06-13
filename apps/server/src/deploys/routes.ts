@@ -4,6 +4,7 @@
 // deploy, upserted on (project_id, deploy_id) as status transitions; the relay
 // (F019.7) reads terminal rows, the registry (F019.8) reads latest success.
 import type { Context, Hono } from 'hono';
+import { cors } from 'hono/cors';
 import { and, desc, eq } from 'drizzle-orm';
 import { getDb, schema } from '../db';
 
@@ -81,6 +82,15 @@ export function registerDeployRoutes(app: Hono): void {
     }
     return c.json({ id, deduped: false, status: b.status });
   });
+
+  // The registry is meant to be polled cross-origin from a deployed app's own SPA
+  // (cardmem.com → here) to detect a new version, so it must answer the CORS
+  // preflight. It's already world-readable (public, no auth, no PII), so origin '*'
+  // GET-only is safe — same posture as the ingest envelope.
+  app.use(
+    '/release/:site',
+    cors({ origin: '*', allowMethods: ['GET', 'OPTIONS'], maxAge: 86400 }),
+  );
 
   // F019.8 — release registry. Public read (the PWA shell polls this client-side
   // to detect a new version): latest SUCCESS for a site. No PII, no project
