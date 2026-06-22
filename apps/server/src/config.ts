@@ -1,16 +1,8 @@
 // Central config — read once from the environment, validated at boot.
 // Secrets come from fly secrets (prod) / .env.local (dev); never hardcoded.
-// Integer parsing + the production secret-guard come from @broberg/config (F021.2).
-// num() (float) stays local — the package has no float coercer yet.
-import { coerceInt, productionGuard } from '@broberg/config';
-
-function num(name: string, fallback: number): number {
-  const raw = process.env[name];
-  if (raw === undefined || raw === '') return fallback;
-  const n = Number(raw);
-  if (!Number.isFinite(n)) throw new Error(`env ${name} must be a number, got "${raw}"`);
-  return n;
-}
+// Integer/float parsing + the production secret-guard come from @broberg/config
+// (F021.2; coerceNum added upstream in @broberg/config@0.2.0 — the gap we filed).
+import { coerceInt, coerceNum, productionGuard } from '@broberg/config';
 
 export const config = {
   nodeEnv: process.env.NODE_ENV ?? 'development',
@@ -48,7 +40,7 @@ export const config = {
   // issue) → "regressed". Evaluated on the correlation worker tick; observe-only.
   deployRegressionWindowMs: coerceInt('DEPLOY_REGRESSION_WINDOW_MS', 900_000), // 15m after-window
   deployRegressionBaselineMs: coerceInt('DEPLOY_REGRESSION_BASELINE_MS', 3_600_000), // 60m baseline
-  deployRegressionMultiplier: num('DEPLOY_REGRESSION_MULTIPLIER', 3.0), // after-rate ≥ baseline×this → flag
+  deployRegressionMultiplier: coerceNum('DEPLOY_REGRESSION_MULTIPLIER', 3.0), // after-rate ≥ baseline×this → flag
   deployRegressionMinAfter: coerceInt('DEPLOY_REGRESSION_MIN_AFTER', 3), // noise floor (min after-errors)
   deployRegressionNewIssueMin: coerceInt('DEPLOY_REGRESSION_NEW_ISSUE_MIN', 3), // new fingerprint ≥ this → flag
   deployRegressionMaxAgeMs: coerceInt('DEPLOY_REGRESSION_MAX_AGE_MS', 21_600_000), // 6h recency bound

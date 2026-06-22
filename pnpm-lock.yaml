@@ -21,8 +21,8 @@ importers:
   apps/server:
     dependencies:
       '@broberg/config':
-        specifier: 0.1.1
-        version: 0.1.1(zod@4.4.3)
+        specifier: 0.2.0
+        version: 0.2.0(zod@4.4.3)
       '@broberg/lens':
         specifier: 0.1.2
         version: 0.1.2(hono@4.12.23)
@@ -291,8 +291,8 @@ packages:
   '@better-fetch/fetch@1.1.21':
     resolution: {integrity: sha512-/ImESw0sskqlVR94jB+5+Pxjf+xBwDZF/N5+y2/q4EqD7IARUTSpPfIo8uf39SYpCxyOCtbyYpUrZ3F/k0zT4A==}
 
-  '@broberg/config@0.1.1':
-    resolution: {integrity: sha512-20D6+80sF4XWAysWG21ZjDwLxHoV274rpEbfZZa/6iMlKpASCAUw1PoWkT/wclBabrrZzE/Ea344lwK4q+XXwg==}
+  '@broberg/config@0.2.0':
+    resolution: {integrity: sha512-84GKN6B1szAfCQKgZw58e/jIITPte7TaD1wowZChyrTtgZh5aQBmgpqyITRqFhq+sk/sjUrDwErwQDpcY6VO1g==}
     peerDependencies:
       zod: '>=3'
 
@@ -2168,7 +2168,7 @@ snapshots:
 
   '@better-fetch/fetch@1.1.21': {}
 
-  '@broberg/config@0.1.1(zod@4.4.3)':
+  '@broberg/config@0.2.0(zod@4.4.3)':
     dependencies:
       zod: 4.4.3
 

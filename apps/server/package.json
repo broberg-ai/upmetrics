@@ -16,7 +16,7 @@
     "typescript": "^5.7.2"
   },
   "dependencies": {
-    "@broberg/config": "0.1.1",
+    "@broberg/config": "0.2.0",
     "@broberg/lens": "0.1.2",
     "@broberg/mail": "0.1.0",
     "@upmetrics/sdk": "^0.1.4",
