@@ -10,6 +10,7 @@
 import { and, eq, gte } from 'drizzle-orm';
 import { getDb, schema } from '../db';
 import { config } from '../config';
+import { mailer } from '../mail';
 
 type Db = ReturnType<typeof getDb>;
 type Incident = typeof schema.incidents.$inferSelect;
@@ -150,17 +151,12 @@ async function deliver(
 }
 
 async function sendEmail(to: string, subject: string, incident: Incident, project: Project): Promise<void> {
-  const res = await fetch(`${config.resendApiBase}/emails`, {
-    method: 'POST',
-    headers: { authorization: `Bearer ${config.resendApiKey}`, 'content-type': 'application/json' },
-    body: JSON.stringify({
-      from: config.authEmailFrom,
-      to: [to],
-      subject,
-      html: `<p><b>${incident.severity.toUpperCase()}</b> incident on ${project.name}</p><p>${incident.title}</p><p>kind: ${incident.kind}</p>`,
-    }),
+  const res = await mailer.send({
+    to,
+    subject,
+    html: `<p><b>${incident.severity.toUpperCase()}</b> incident on ${project.name}</p><p>${incident.title}</p><p>kind: ${incident.kind}</p>`,
   });
-  if (!res.ok) throw new Error(`resend ${res.status}`);
+  if (!res.ok) throw new Error(`resend ${res.error ?? 'send failed'}`);
 }
 
 async function sendDiscord(webhookUrl: string, subject: string, incident: Incident): Promise<void> {

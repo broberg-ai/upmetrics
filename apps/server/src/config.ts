@@ -1,12 +1,8 @@
 // Central config — read once from the environment, validated at boot.
 // Secrets come from fly secrets (prod) / .env.local (dev); never hardcoded.
-function int(name: string, fallback: number): number {
-  const raw = process.env[name];
-  if (raw === undefined || raw === '') return fallback;
-  const n = Number(raw);
-  if (!Number.isInteger(n)) throw new Error(`env ${name} must be an integer, got "${raw}"`);
-  return n;
-}
+// Integer parsing + the production secret-guard come from @broberg/config (F021.2).
+// num() (float) stays local — the package has no float coercer yet.
+import { coerceInt, productionGuard } from '@broberg/config';
 
 function num(name: string, fallback: number): number {
   const raw = process.env[name];
@@ -18,14 +14,13 @@ function num(name: string, fallback: number): number {
 
 export const config = {
   nodeEnv: process.env.NODE_ENV ?? 'development',
-  port: int('PORT', 3017),
+  port: coerceInt('PORT', 3017),
   databasePath: process.env.DATABASE_PATH ?? './local.db',
   // Auth (F001.4). Secrets come from .env.local (dev) / fly secrets (prod).
-  authBaseUrl: process.env.AUTH_BASE_URL ?? `http://localhost:${int('PORT', 3017)}`,
+  authBaseUrl: process.env.AUTH_BASE_URL ?? `http://localhost:${coerceInt('PORT', 3017)}`,
   authSecret: process.env.AUTH_SECRET ?? 'dev-only-secret-change-in-prod',
   authEmailFrom: process.env.AUTH_EMAIL_FROM ?? 'Upmetrics <upmetrics@webhouse.dk>',
   resendApiKey: process.env.RESEND_API_KEY ?? '',
-  resendApiBase: process.env.RESEND_API_BASE ?? 'https://api.resend.com',
   // Self-monitoring (F009.1 dogfood): the server's own @upmetrics/sdk DSN.
   selfDsn: process.env.UPMETRICS_SELF_DSN ?? '',
   // F019.4 — read-only GitHub token (classic PAT, scope repo) for the CI/deploy
@@ -51,12 +46,12 @@ export const config = {
   // success deploy's observation window elapses, compare the project's error rate
   // after the deploy vs a baseline before it; a material rise (or a brand-new
   // issue) → "regressed". Evaluated on the correlation worker tick; observe-only.
-  deployRegressionWindowMs: int('DEPLOY_REGRESSION_WINDOW_MS', 900_000), // 15m after-window
-  deployRegressionBaselineMs: int('DEPLOY_REGRESSION_BASELINE_MS', 3_600_000), // 60m baseline
+  deployRegressionWindowMs: coerceInt('DEPLOY_REGRESSION_WINDOW_MS', 900_000), // 15m after-window
+  deployRegressionBaselineMs: coerceInt('DEPLOY_REGRESSION_BASELINE_MS', 3_600_000), // 60m baseline
   deployRegressionMultiplier: num('DEPLOY_REGRESSION_MULTIPLIER', 3.0), // after-rate ≥ baseline×this → flag
-  deployRegressionMinAfter: int('DEPLOY_REGRESSION_MIN_AFTER', 3), // noise floor (min after-errors)
-  deployRegressionNewIssueMin: int('DEPLOY_REGRESSION_NEW_ISSUE_MIN', 3), // new fingerprint ≥ this → flag
-  deployRegressionMaxAgeMs: int('DEPLOY_REGRESSION_MAX_AGE_MS', 21_600_000), // 6h recency bound
+  deployRegressionMinAfter: coerceInt('DEPLOY_REGRESSION_MIN_AFTER', 3), // noise floor (min after-errors)
+  deployRegressionNewIssueMin: coerceInt('DEPLOY_REGRESSION_NEW_ISSUE_MIN', 3), // new fingerprint ≥ this → flag
+  deployRegressionMaxAgeMs: coerceInt('DEPLOY_REGRESSION_MAX_AGE_MS', 21_600_000), // 6h recency bound
   // Org-level read-only cost token (GET /api/cost/fleet — cross-project per-agent
   // aggregates for buddy's daily fleet-cost digest). Read-only, cost-only, no PII.
   // Empty → the fleet endpoint is disabled (401). Single source: Fly secret.
@@ -66,31 +61,31 @@ export const config = {
   // mint-endpoint standard). Empty → the mint endpoint is disabled (401).
   lensMintSecret: process.env.LENS_MINT_SECRET ?? '',
   // Incident correlation (F005.1).
-  correlationIntervalMs: int('CORRELATION_INTERVAL_MS', 30_000),
-  spikeWindowMs: int('SPIKE_WINDOW_MS', 300_000), // 5 min
-  errorSpikeThreshold: int('ERROR_SPIKE_THRESHOLD', 10),
-  agentFailureSpikeThreshold: int('AGENT_FAILURE_SPIKE_THRESHOLD', 5),
+  correlationIntervalMs: coerceInt('CORRELATION_INTERVAL_MS', 30_000),
+  spikeWindowMs: coerceInt('SPIKE_WINDOW_MS', 300_000), // 5 min
+  errorSpikeThreshold: coerceInt('ERROR_SPIKE_THRESHOLD', 10),
+  agentFailureSpikeThreshold: coerceInt('AGENT_FAILURE_SPIKE_THRESHOLD', 5),
   // Alert engine (F005.2). Dedup window per (rule, incident, severity).
-  alertDedupWindowMs: int('ALERT_DEDUP_WINDOW_MS', 3_600_000), // 1h
+  alertDedupWindowMs: coerceInt('ALERT_DEDUP_WINDOW_MS', 3_600_000), // 1h
   // Remediation dispatcher (F005.3).
   remediationThreshold: process.env.REMEDIATION_THRESHOLD ?? 'medium', // min severity
-  remediationRetries: int('REMEDIATION_RETRIES', 3),
-  remediationBackoffMs: int('REMEDIATION_BACKOFF_MS', 500),
+  remediationRetries: coerceInt('REMEDIATION_RETRIES', 3),
+  remediationBackoffMs: coerceInt('REMEDIATION_BACKOFF_MS', 500),
   // Fleet-scale alert-storm control (F008.3). Layers on top of F005.2 dedup.
-  stormWindowMs: int('STORM_WINDOW_MS', 300_000), // 5 min correlation window
-  stormProjectThreshold: int('STORM_PROJECT_THRESHOLD', 3), // distinct projects → fleet roll-up
-  stormIncidentThreshold: int('STORM_INCIDENT_THRESHOLD', 5), // total open incidents → fleet roll-up
+  stormWindowMs: coerceInt('STORM_WINDOW_MS', 300_000), // 5 min correlation window
+  stormProjectThreshold: coerceInt('STORM_PROJECT_THRESHOLD', 3), // distinct projects → fleet roll-up
+  stormIncidentThreshold: coerceInt('STORM_INCIDENT_THRESHOLD', 5), // total open incidents → fleet roll-up
   // Incident kinds that are a "region/upmetrics-down" suppressor signal (AC2):
   // when one is open, downstream per-site alerts are suppressed for the window.
   fleetOutageKinds: (process.env.FLEET_OUTAGE_KINDS ?? 'region_down,upmetrics_down').split(',').filter(Boolean),
   fleetAlertDiscordWebhook: process.env.FLEET_ALERT_DISCORD_WEBHOOK ?? '', // roll-up + digest target
-  alertRateCapacity: int('ALERT_RATE_CAPACITY', 10), // global token bucket per window
-  alertDigestIntervalMs: int('ALERT_DIGEST_INTERVAL_MS', 600_000), // 10 min min between digests
+  alertRateCapacity: coerceInt('ALERT_RATE_CAPACITY', 10), // global token bucket per window
+  alertDigestIntervalMs: coerceInt('ALERT_DIGEST_INTERVAL_MS', 600_000), // 10 min min between digests
   // Ops hardening (F007).
-  retentionIntervalMs: int('RETENTION_INTERVAL_MS', 86_400_000), // daily compaction
-  retentionBatchSize: int('RETENTION_BATCH_SIZE', 1000), // batched deletes (no long lock)
-  probeCompactionDays: int('PROBE_COMPACTION_DAYS', 7), // downsample probe_results to hourly after
-  ingestWarnIntervalMs: int('INGEST_WARN_INTERVAL_MS', 60_000), // dedup the over-limit warning event
+  retentionIntervalMs: coerceInt('RETENTION_INTERVAL_MS', 86_400_000), // daily compaction
+  retentionBatchSize: coerceInt('RETENTION_BATCH_SIZE', 1000), // batched deletes (no long lock)
+  probeCompactionDays: coerceInt('PROBE_COMPACTION_DAYS', 7), // downsample probe_results to hourly after
+  ingestWarnIntervalMs: coerceInt('INGEST_WARN_INTERVAL_MS', 60_000), // dedup the over-limit warning event
   // Auto-remediation relay (F010). Buddy (local) polls /api/remediation/pending
   // with this bearer token + claims relayed incidents. Pull model — upmetrics
   // never pushes (Buddy is Tailscale-local, not cloud-reachable).
@@ -106,8 +101,8 @@ export const config = {
   // terminal deploy older than this is SUPPRESSED (stamped relayed without pinging).
   // Stops a backlog that accumulated while a target was offline from storming the fleet
   // when push resumes — only fresh deploys ping. 30m default; tune via env.
-  deployRelayMaxAgeMs: int('DEPLOY_RELAY_MAX_AGE_MS', 1_800_000),
-  remediationEscalateMs: int('REMEDIATION_ESCALATE_MS', 1_800_000), // unclaimed > this → escalate to Christian
+  deployRelayMaxAgeMs: coerceInt('DEPLOY_RELAY_MAX_AGE_MS', 1_800_000),
+  remediationEscalateMs: coerceInt('REMEDIATION_ESCALATE_MS', 1_800_000), // unclaimed > this → escalate to Christian
   // F005.4 — push error-incidents to cardmem's Inbox as triage cards (PUSH model,
   // cardmem F067). Disabled when CARDMEM_INCIDENTS_KEY is unset. Each incident is
   // pushed at most once (incidents.cardmem_pushed_at); cardmem dedups on
@@ -119,15 +114,14 @@ export const config = {
   cardmemPushProjects: (process.env.CARDMEM_PUSH_PROJECTS ?? 'cardmem').split(',').filter(Boolean),
 } as const;
 
-// Fail fast in production with a CLEAR error if a required secret is missing or
-// still the dev default — never silently ship with insecure defaults.
-if (config.nodeEnv === 'production') {
-  const missing: string[] = [];
-  if (!config.authSecret || config.authSecret === 'dev-only-secret-change-in-prod') missing.push('AUTH_SECRET');
-  if (!config.resendApiKey) missing.push('RESEND_API_KEY');
-  if (missing.length) {
-    throw new Error(`Missing required production env: ${missing.join(', ')} — set via fly secrets before deploy.`);
-  }
+// Fail fast in production if a required secret is missing or still the dev
+// default — never silently ship with insecure defaults. AUTH_SECRET needs a
+// VALUE check (not just truthy): the dev default is truthy, so productionGuard
+// (truthy-only) can't catch it — that one stays explicit. The plain falsy-only
+// keys go through @broberg/config's productionGuard.
+if (config.nodeEnv === 'production' && (!config.authSecret || config.authSecret === 'dev-only-secret-change-in-prod')) {
+  throw new Error('Missing required production env: AUTH_SECRET — set via fly secrets before deploy.');
 }
+productionGuard(config, ['resendApiKey'], config.nodeEnv);
 
 export type Config = typeof config;

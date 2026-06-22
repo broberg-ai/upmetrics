@@ -1,27 +1,35 @@
 // Local verification for F005.2 alert engine (no prod / no real email/Discord).
-// A local capture server stands in for Resend + Discord + generic webhook so all
-// 3 channels deliver for real over HTTP and we can assert. Then dedup + escalate.
-// Run: RESEND_API_BASE=http://localhost:3099 RESEND_API_KEY=test bun apps/server/verify-alerts.ts
+// Email now ships via @broberg/mail (F021.3), which posts to Resend's own URL with
+// no base-override — so instead of a local capture server we monkeypatch
+// globalThis.fetch and capture ALL three channels (email via the package, Discord
+// + generic webhook via alerts.ts) by URL. Then dedup + escalate.
+// Run: RESEND_API_KEY=test bun apps/server/verify-alerts.ts
 import { Database } from 'bun:sqlite';
 import { drizzle } from 'drizzle-orm/bun-sqlite';
 import { eq } from 'drizzle-orm';
-import { readFileSync } from 'node:fs';
+import { readFileSync, readdirSync } from 'node:fs';
 import * as schema from './src/db/schema';
-import { runAlerts } from './src/incidents/alerts';
 
-// ── capture server (Resend /emails, Discord /discord, generic /webhook) ──
-const captured: { path: string }[] = [];
-const server = Bun.serve({
-  port: 3099,
-  async fetch(req) {
-    captured.push({ path: new URL(req.url).pathname });
-    return new Response('{}', { status: 200, headers: { 'content-type': 'application/json' } });
-  },
-});
+// ── capture every outbound fetch (Resend /emails, Discord, generic webhook) ──
+// MUST be installed before importing the alert engine: @broberg/mail binds its
+// fetch at createMailer time (module load), so we patch first, then dynamic-import.
+const captured: { url: string }[] = [];
+globalThis.fetch = (async (input: unknown) => {
+  const url = typeof input === 'string' ? input : (input as { url?: string })?.url ?? String(input);
+  captured.push({ url });
+  return new Response('{"id":"test"}', { status: 200, headers: { 'content-type': 'application/json' } });
+}) as typeof fetch;
+
+const { runAlerts } = await import('./src/incidents/alerts');
 
 const sqlite = new Database(`/tmp/upm-alerts-${Date.now()}.db`);
 sqlite.exec('PRAGMA foreign_keys = ON;');
-sqlite.exec(readFileSync(import.meta.dir + '/src/db/migrations/0000_far_lake.sql', 'utf8'));
+// Apply ALL migrations in order (not just 0000) — the schema has grown columns
+// with defaults since, which drizzle includes in inserts.
+const migDir = import.meta.dir + '/src/db/migrations';
+for (const f of readdirSync(migDir).filter((f) => f.endsWith('.sql')).sort()) {
+  sqlite.exec(readFileSync(`${migDir}/${f}`, 'utf8'));
+}
 const db = drizzle(sqlite, { schema });
 const now = new Date();
 
@@ -54,6 +62,7 @@ db.insert(schema.incidents)
   .run();
 
 const history = () => db.select().from(schema.alertHistory).all();
+const hit = (needle: string) => captured.some((c) => c.url.includes(needle));
 let pass = true;
 const check = (name: string, cond: boolean, detail = '') => { console.log(`${cond ? '✅' : '❌'} ${name}${detail ? ' — ' + detail : ''}`); if (!cond) pass = false; };
 
@@ -61,7 +70,7 @@ const check = (name: string, cond: boolean, detail = '') => { console.log(`${con
 const r1 = await runAlerts(db, now);
 const h1 = history();
 check('AC0/AC1: rule evaluated + fired once', r1.fired === 1, JSON.stringify(r1));
-check('AC1: all 3 channels delivered (real HTTP capture)', ['/emails', '/discord', '/webhook'].every((p) => captured.some((c) => c.path === p)), JSON.stringify(captured.map((c) => c.path)));
+check('AC1: all 3 channels delivered (real HTTP capture)', ['/emails', '/discord', '/webhook'].every(hit), JSON.stringify(captured.map((c) => c.url)));
 check('AC1: alert_history row with channelsSent=[email,discord,webhook]', h1.length === 1 && JSON.stringify(h1[0].channelsSent) === '["email","discord","webhook"]', JSON.stringify(h1[0]?.channelsSent));
 
 // (2) second run, same severity, inside window → deduped, no new sends
@@ -77,6 +86,5 @@ const r3 = await runAlerts(db, new Date(now.getTime() + 2000));
 check('escalation (higher severity) breaks dedup → re-fires', r3.fired === 1, JSON.stringify(r3));
 check('escalation produced a 2nd alert_history row', history().length === 2, `rows=${history().length}`);
 
-server.stop(true);
 console.log(pass ? '\nALL CHECKS PASSED' : '\nSOME CHECKS FAILED');
 process.exit(pass ? 0 : 1);

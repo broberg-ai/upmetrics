@@ -20,6 +20,15 @@ importers:
 
   apps/server:
     dependencies:
+      '@broberg/config':
+        specifier: 0.1.1
+        version: 0.1.1(zod@4.4.3)
+      '@broberg/lens':
+        specifier: 0.1.2
+        version: 0.1.2(hono@4.12.23)
+      '@broberg/mail':
+        specifier: 0.1.0
+        version: 0.1.0
       '@upmetrics/sdk':
         specifier: ^0.1.4
         version: 0.1.4
@@ -35,9 +44,6 @@ importers:
       kysely:
         specifier: 0.28.17
         version: 0.28.17
-      resend:
-        specifier: ^6.12.4
-        version: 6.12.4
       zod:
         specifier: ^4.0.0
         version: 4.4.3
@@ -284,6 +290,22 @@ packages:
 
   '@better-fetch/fetch@1.1.21':
     resolution: {integrity: sha512-/ImESw0sskqlVR94jB+5+Pxjf+xBwDZF/N5+y2/q4EqD7IARUTSpPfIo8uf39SYpCxyOCtbyYpUrZ3F/k0zT4A==}
+
+  '@broberg/config@0.1.1':
+    resolution: {integrity: sha512-20D6+80sF4XWAysWG21ZjDwLxHoV274rpEbfZZa/6iMlKpASCAUw1PoWkT/wclBabrrZzE/Ea344lwK4q+XXwg==}
+    peerDependencies:
+      zod: '>=3'
+
+  '@broberg/lens@0.1.2':
+    resolution: {integrity: sha512-O2d+evzmKQjzlwO9n59L9reDfc1uu6MtTfi8OSZsfpXHECp/2+uQt3BxHd5QhzMJw4jVAg1SuVBgWadDDcUvLQ==}
+    peerDependencies:
+      hono: '>=4'
+    peerDependenciesMeta:
+      hono:
+        optional: true
+
+  '@broberg/mail@0.1.0':
+    resolution: {integrity: sha512-H8Trh+EN3tqCFdZrfRQsWQJFjVeg8S7se1hJbIEjxiez6zlN9PMdjsD9QuOiUNsShyWdw9MGzihqMdQfx5IIZg==}
 
   '@drizzle-team/brocli@0.10.2':
     resolution: {integrity: sha512-z33Il7l5dKjUgGULTqBsQBQwckHh5AbIuxhdsIxDDiZAzBOrZO6q9ogcWC65kU382AfynTfgNumVcNIjuIua6w==}
@@ -1086,9 +1108,6 @@ packages:
     cpu: [x64]
     os: [win32]
 
-  '@stablelib/base64@1.0.1':
-    resolution: {integrity: sha512-1bnPQqSxSuc3Ii6MhBysoWCg58j97aUjuCSZrGSmDxNqtytIi0k8utUenAwTZN4V5mXXYGsVUI9zeBqy+jBOSQ==}
-
   '@standard-schema/spec@1.1.0':
     resolution: {integrity: sha512-l2aFy5jALhniG5HgqrD6jXLi/rUWrKvqN/qJx6yoJsgKhblVd+iqqU4RCXavm/jPityDo5TCvKMnpjKnOriy0w==}
 
@@ -1592,9 +1611,6 @@ packages:
     resolution: {integrity: sha512-jt2DW/aNFNwke7AUd+Z+e6pz39KO5rzdbbFCg2sGafS4mk13MI7Z8O5z9cADNn5lhGODIgLwug6TZO2ctf7kcw==}
     engines: {node: '>=6.0.0'}
 
-  fast-sha256@1.3.0:
-    resolution: {integrity: sha512-n11RGP/lrWEFI/bWdygLxhI+pVeo1ZYIVwvvPkW7azl/rOy+F3HYRZ2K5zeE9mmkhQppyv9sQFx0JM9UabnpPQ==}
-
   fsevents@2.3.3:
     resolution: {integrity: sha512-5xoDfX+fL7faATnagmWPpbFtwh/R77WmMMqqHGS65C3vvB0YHrgF+B1YmZ3441tMj5n63k0212XNoJwzlhffQw==}
     engines: {node: ^8.16.0 || ^10.6.0 || >=11.0.0}
@@ -1778,9 +1794,6 @@ packages:
     resolution: {integrity: sha512-QP88BAKvMam/3NxH6vj2o21R6MjxZUAd6nlwAS/pnGvN9IVLocLHxGYIzFhg6fUQ+5th6P4dv4eW9jX3DSIj7A==}
     engines: {node: '>=12'}
 
-  postal-mime@2.7.4:
-    resolution: {integrity: sha512-0WdnFQYUrPGGTFu1uOqD2s7omwua8xaeYGdO6rb88oD5yJ/4pPHDA4sdWqfD8wQVfCny563n/HQS7zTFft+f/g==}
-
   postcss@8.5.15:
     resolution: {integrity: sha512-FfR8sjd4em2T6fb3I2MwAJU7HWVMr9zba+enmQeeWFfCbm+UOC/0X4DS8XtpUTMwWMGbjKYP7xjfNekzyGmB3A==}
     engines: {node: ^10 || ^12 || >=14}
@@ -1845,15 +1858,6 @@ packages:
       react: ^16.0.0 || ^17.0.0 || ^18.0.0 || ^19.0.0
       react-dom: ^16.0.0 || ^17.0.0 || ^18.0.0 || ^19.0.0
 
-  resend@6.12.4:
-    resolution: {integrity: sha512-lRpJ2Hxd+ht+JPDm97juRcUp9HOMuZyxaRFRFmc9Tx8iNWiei94Dx9v6SWufgKk2667C/uCeKKspMotOHSpCSg==}
-    engines: {node: '>=20'}
-    peerDependencies:
-      '@react-email/render': '*'
-    peerDependenciesMeta:
-      '@react-email/render':
-        optional: true
-
   resolve-pkg-maps@1.0.0:
     resolution: {integrity: sha512-seS2Tj26TBVOC2NIc2rOe2y2ZO7efxITtLZcGSOnHHNOQ7CkiUBfw0Iw2ck6xkIhPwLhKNLS8BO+hEpngQlqzw==}
 
@@ -1896,9 +1900,6 @@ packages:
   stack-trace@1.0.0:
     resolution: {integrity: sha512-H6D7134xi6qONvh7ZHKgviXf+rd3vhGBSvebPZCaUkd8zvQ+7PtDw6CljPTe4cXWNf2IKZGNqw6VJXSb9IgBpA==}
     engines: {node: '>=20.0.0'}
-
-  standardwebhooks@1.0.0:
-    resolution: {integrity: sha512-BbHGOQK9olHPMvQNHWul6MYlrRTAOKn03rOe4A8O3CLWhNf4YHBqq2HJKKC+sfqpxiBY52pNeesD6jIiLDz8jg==}
 
   tailwindcss@4.3.0:
     resolution: {integrity: sha512-y6nxMGB1nMW9R6k96e5gdIFzcfL/gTJRNaqGes1YvkLnPVXzWgbqFF2yLC0T8G774n24cx3Pe8XrKoniCOAH+Q==}
@@ -2166,6 +2167,16 @@ snapshots:
       '@noble/hashes': 2.2.0
 
   '@better-fetch/fetch@1.1.21': {}
+
+  '@broberg/config@0.1.1(zod@4.4.3)':
+    dependencies:
+      zod: 4.4.3
+
+  '@broberg/lens@0.1.2(hono@4.12.23)':
+    optionalDependencies:
+      hono: 4.12.23
+
+  '@broberg/mail@0.1.0': {}
 
   '@drizzle-team/brocli@0.10.2': {}
 
@@ -2626,8 +2637,6 @@ snapshots:
   '@rollup/rollup-win32-x64-msvc@4.60.4':
     optional: true
 
-  '@stablelib/base64@1.0.1': {}
-
   '@standard-schema/spec@1.1.0': {}
 
   '@tailwindcss/node@4.3.0':
@@ -3040,8 +3049,6 @@ snapshots:
 
   fast-equals@5.4.0: {}
 
-  fast-sha256@1.3.0: {}
-
   fsevents@2.3.3:
     optional: true
 
@@ -3165,8 +3172,6 @@ snapshots:
 
   picomatch@4.0.4: {}
 
-  postal-mime@2.7.4: {}
-
   postcss@8.5.15:
     dependencies:
       nanoid: 3.3.12
@@ -3237,11 +3242,6 @@ snapshots:
       tiny-invariant: 1.3.3
       victory-vendor: 36.9.2
 
-  resend@6.12.4:
-    dependencies:
-      postal-mime: 2.7.4
-      standardwebhooks: 1.0.0
-
   resolve-pkg-maps@1.0.0: {}
 
   rollup@4.60.4:
@@ -3299,11 +3299,6 @@ snapshots:
   source-map@0.7.6: {}
 
   stack-trace@1.0.0: {}
-
-  standardwebhooks@1.0.0:
-    dependencies:
-      '@stablelib/base64': 1.0.1
-      fast-sha256: 1.3.0
 
   tailwindcss@4.3.0: {}
 
