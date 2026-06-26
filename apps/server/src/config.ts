@@ -48,6 +48,12 @@ export const config = {
   // aggregates for buddy's daily fleet-cost digest). Read-only, cost-only, no PII.
   // Empty → the fleet endpoint is disabled (401). Single source: Fly secret.
   fleetReadKey: process.env.FLEET_READ_KEY ?? '',
+  // Display FX rate for the cost API + dashboard. USD (micro_usd) stays the
+  // source-of-truth money; DKK is an at-a-glance companion. THE single server
+  // source so consumers (cardmem's TTS-cost panel, our dashboard) read the rate
+  // off /api/cost/summary instead of hardcoding 6.9 — Christian's "én kilde"
+  // rule. Env-overridable; bump if it drifts.
+  usdToDkk: coerceNum('USD_TO_DKK', 6.9),
   // Lens mint secret (F016 — POST /api/lens-session). Bearer-gates minting a
   // short-lived read-only lens session for visual verification (fleet Lens
   // mint-endpoint standard). Empty → the mint endpoint is disabled (401).

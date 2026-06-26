@@ -3,7 +3,9 @@
 // Auth: header X-Upmetrics-Key = the project's api_key (same per-project key as
 // ingest; reused read-side for v1). Money is ALWAYS integer micro-USD ($1 =
 // 1_000_000): SUM(cost_usd) in full REAL precision, round ONCE at the boundary
-// (trail pitfall #3). USD is source-of-truth — clients do their own FX.
+// (trail pitfall #3). USD is source-of-truth; the summary ALSO publishes
+// usd_to_dkk (config single-source) so clients convert from one rate instead of
+// hardcoding their own FX.
 // metered: a run is "free" when transport=subprocess OR cost_usd=0 (Max-Plan).
 import type { Context, Hono } from 'hono';
 import { timingSafeEqual } from 'node:crypto';
@@ -118,6 +120,11 @@ export function costSummary(db: Db, projectId: string, q: Record<string, string 
     generated_at: new Date(now).toISOString(),
     window: { from: new Date(fromMs).toISOString(), to: new Date(toMs).toISOString() },
     total_micro_usd: microUsd(t.cost_usd),
+    // DKK companion off the single config rate. usd_to_dkk lets clients convert
+    // ANY micro_usd field (e.g. a ?tag.capability=tts slice); total_dkk is the
+    // ready headline, rounded ONCE to øre from the raw REAL sum.
+    usd_to_dkk: config.usdToDkk,
+    total_dkk: Math.round(Number(t.cost_usd ?? 0) * config.usdToDkk * 100) / 100,
     input_tokens: Number(t.input_tokens),
     output_tokens: Number(t.output_tokens),
     cache_read_tokens: Number(t.cache_read_tokens),

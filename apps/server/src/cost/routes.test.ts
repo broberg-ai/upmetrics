@@ -89,6 +89,13 @@ describe('GET /api/cost/summary', () => {
     expect(b.generated_at).toBeTruthy();
   });
 
+  it('publishes usd_to_dkk + a ready total_dkk (one-source FX for consumers)', async () => {
+    const b = await json(await get('/api/cost/summary'));
+    expect(b.usd_to_dkk).toBe(config.usdToDkk); // the single published rate
+    // total_micro_usd 7000 → $0.007 → DKK round($0.007 * rate, øre)
+    expect(b.total_dkk).toBeCloseTo(Math.round((7000 / 1e6) * config.usdToDkk * 100) / 100, 5);
+  });
+
   it('breakdowns by provider/model/tier/capability', async () => {
     const b = await json(await get('/api/cost/summary'));
     const prov = Object.fromEntries(b.by_provider.map((x: any) => [x.key, x.micro_usd]));
