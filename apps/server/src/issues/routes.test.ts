@@ -12,6 +12,7 @@ const MIGRATIONS = new URL('../db/migrations', import.meta.url).pathname;
 // route tests (cost), so generic ids like 'other' would collide. Keep unique.
 const KEY = 'uk_isr_trail';
 const OTHER = 'uk_isr_other';
+const PRE = 'uk_isr_pre';
 const app = new Hono();
 
 beforeAll(() => {
@@ -22,11 +23,16 @@ beforeAll(() => {
     db.insert(schema.projects).values({ id, name: id, dsn: `https://k@upmetrics.org/${id}`, apiKey: key, platform: 'web', retentionDays: 30, agentRetentionDays: 90, createdAt: now, updatedAt: now }).run();
   proj('isr_trail', KEY);
   proj('isr_other', OTHER);
+  proj('isr_pre', PRE); // isolates prefix-resolve issues from resolve-all's count
   const iss = (id: string, projectId: string, status: string) =>
     db.insert(schema.issues).values({ id, projectId, fingerprint: `fp_${id}`, title: `boom ${id}`, culprit: 'src/x.ts', level: 'error', status, firstSeen: now, lastSeen: now, eventCount: 3 }).run();
   iss('isr1', 'isr_trail', 'unresolved');
   iss('isr2', 'isr_trail', 'resolved');
   iss('isr3', 'isr_other', 'unresolved'); // must never be visible/resolvable via trail key
+  // UUID-id issues for prefix-resolve (dashboard shows the first 8 chars).
+  iss('abcd1234-aaaa-4aaa-8aaa-000000000001', 'isr_pre', 'unresolved'); // unique prefix 'abcd1234'
+  iss('dead0001-bbbb-4bbb-8bbb-000000000002', 'isr_pre', 'unresolved'); // shares 'dead000' …
+  iss('dead0002-cccc-4ccc-8ccc-000000000003', 'isr_pre', 'unresolved'); // … with this → ambiguous
   registerIssueRoutes(app);
 });
 
@@ -62,6 +68,24 @@ describe('POST /api/issues/:id/resolve', () => {
   it('accepts status=ignored', async () => {
     const r = await json(await req('/api/issues/isr2/resolve', KEY, { method: 'POST', body: JSON.stringify({ status: 'ignored' }) }));
     expect(r.status).toBe('ignored');
+  });
+
+  it('resolves by a UNIQUE id-prefix (the dashboard short id)', async () => {
+    const r = await req('/api/issues/abcd1234/resolve', PRE, { method: 'POST', body: '{}' });
+    expect(r.status).toBe(200);
+    const b = await json(r);
+    expect(b.id).toBe('abcd1234-aaaa-4aaa-8aaa-000000000001'); // resolved by full id
+    expect(b.status).toBe('resolved');
+  });
+
+  it('409 on an AMBIGUOUS prefix — never resolves the wrong issue', async () => {
+    const r = await req('/api/issues/dead000/resolve', PRE, { method: 'POST', body: '{}' });
+    expect(r.status).toBe(409);
+    expect((await json(r)).error).toBe('ambiguous_prefix');
+  });
+
+  it('a non-hex param is never treated as a prefix (still 404, scoping intact)', async () => {
+    expect((await req('/api/issues/isr3/resolve', KEY, { method: 'POST', body: '{}' })).status).toBe(404);
   });
 });
 

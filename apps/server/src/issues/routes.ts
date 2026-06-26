@@ -4,7 +4,7 @@
 // needs no dashboard login. Mirrors the cost/enrollment auth pattern; a project
 // can only ever see or touch its own issues.
 import type { Context, Hono } from 'hono';
-import { and, desc, eq } from 'drizzle-orm';
+import { and, desc, eq, like } from 'drizzle-orm';
 import { getDb, schema } from '../db';
 
 function projectFromKey(c: Context) {
@@ -49,17 +49,31 @@ export function registerIssueRoutes(app: Hono): void {
     const project = projectFromKey(c);
     if (!project) return c.json({ error: 'invalid_api_key' }, 401);
     const db = getDb();
-    const id = c.req.param('id');
-    const issue = db
+    const param = c.req.param('id');
+    // Exact id first. Fall back to a UNIQUE id-prefix so the short id shown in the
+    // dashboard (first 8 chars) resolves without the full UUID — the displayed id
+    // should always be actionable. Prefix is hex/dash only (a UUID fragment), so
+    // it can't carry a SQL-LIKE wildcard. Ambiguous prefix → 409, never a silent
+    // wrong-issue resolve.
+    let issue = db
       .select()
       .from(schema.issues)
-      .where(and(eq(schema.issues.id, id), eq(schema.issues.projectId, project.id)))
+      .where(and(eq(schema.issues.id, param), eq(schema.issues.projectId, project.id)))
       .get();
+    if (!issue && /^[0-9a-f-]{4,}$/i.test(param)) {
+      const matches = db
+        .select()
+        .from(schema.issues)
+        .where(and(like(schema.issues.id, `${param}%`), eq(schema.issues.projectId, project.id)))
+        .all();
+      if (matches.length > 1) return c.json({ error: 'ambiguous_prefix', matches: matches.length }, 409);
+      issue = matches[0];
+    }
     if (!issue) return c.json({ error: 'not_found' }, 404);
     const body = (await c.req.json().catch(() => ({}))) as { status?: string };
     const status = body.status && STATUSES.has(body.status) ? body.status : 'resolved';
-    db.update(schema.issues).set({ status }).where(eq(schema.issues.id, id)).run();
-    return c.json({ ok: true, id, status });
+    db.update(schema.issues).set({ status }).where(eq(schema.issues.id, issue.id)).run();
+    return c.json({ ok: true, id: issue.id, status });
   });
 
   // Clear slate — resolve (or ignore) ALL of YOUR currently-open issues in one
