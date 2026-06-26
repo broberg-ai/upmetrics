@@ -20,6 +20,15 @@ export interface InitOptions {
    * and manual captureException/captureMessage — so the event is never sent.
    */
   ignoreErrors?: Array<string | RegExp>;
+  /**
+   * Skip AUTO-capture (failed-fetch + 5xx) for requests whose URL matches any
+   * entry — for known-transient endpoints an app already handles itself (health
+   * polls, relay/heartbeat POSTs). String matches case-insensitively as a
+   * substring; RegExp matches as written. Only affects auto-instrument; a manual
+   * captureException()/captureMessage() is unaffected. Cleaner than ignoreErrors
+   * for this case: it scopes by endpoint, so a real timeout elsewhere still surfaces.
+   */
+  denyUrls?: Array<string | RegExp>;
 }
 
 interface Dsn {
@@ -108,8 +117,17 @@ function baseEvent(): Record<string, unknown> {
 // dropped entirely — never sent, on any path. String entries match
 // case-insensitively as a substring; RegExp entries match as written.
 function isIgnored(text: string): boolean {
-  const patterns = config?.ignoreErrors;
-  if (!patterns?.length) return false;
+  return matchesAny(config?.ignoreErrors, text);
+}
+
+// URL-scoped auto-capture suppressor (InitOptions.denyUrls). Same match rules as
+// ignoreErrors; only consulted on the auto-instrument fetch path.
+function isDenied(url: string): boolean {
+  return matchesAny(config?.denyUrls, url);
+}
+
+function matchesAny(patterns: Array<string | RegExp> | undefined, text: string): boolean {
+  if (!patterns?.length || !text) return false;
   const lower = text.toLowerCase();
   for (const p of patterns) {
     if (typeof p === 'string') {
@@ -166,25 +184,39 @@ function send(event: Record<string, unknown>): string | null {
   return event.event_id as string;
 }
 
-// Benign client-side network/chunk failures dominate browser error volume but are
-// almost never bugs: a deploy restart, a user going offline, a navigation that
-// aborts an in-flight fetch, or a stale code-split chunk after a deploy. Capturing
-// each floods the project + trips false error-spikes (cardmem deploy-noise, 2026-06-02).
+// Transient network failures dominate error volume but are almost never bugs: a
+// deploy restart, a user going offline, a navigation that aborts an in-flight
+// fetch, a stale code-split chunk, or — on a Node/Bun daemon — a relay/heartbeat
+// POST that times out against a momentarily-unreachable peer. The app already
+// handles these; auto-capturing each floods the project + trips false error-spikes
+// (cardmem deploy-noise 2026-06-02; buddy relay/poll TimeoutError storm 2026-06-26).
 // Policy: drop them from AUTO-capture (genuine downtime is caught by uptime probes),
 // keep a breadcrumb for context, and sample at most one per minute as a low-severity
 // warning so a really-broken endpoint (sustained) still trickles in — never as an
 // 'error', so it can't trip an error-spike. Manual captureException() is unaffected.
+// Covers: browser fetch/chunk failures; Node fetch failures ("fetch failed");
+// timeouts/aborts (TimeoutError/AbortError, AbortSignal.timeout); and the undici +
+// libuv transient codes carried on err.code / err.cause.
 const BENIGN_NETWORK_RE =
-  /failed to fetch|load failed|networkerror when attempting to fetch|fetch dynamically imported module|loading chunk \d+ failed|loading css chunk|importing a module script failed/i;
+  /failed to fetch|fetch failed|load failed|networkerror when attempting to fetch|fetch dynamically imported module|loading chunk \d+ failed|loading css chunk|importing a module script failed|operation (was aborted|timed out)|timeouterror|aborterror|und_err_(connect_timeout|headers_timeout|body_timeout|socket)|econnrefused|econnreset|etimedout|enotfound|eai_again|socket hang up/i;
 let lastBenignSentAt = 0;
+// Flatten an error to matchable text: name + message + code, plus the same for a
+// one-level cause (Node wraps the real reason — e.g. TypeError "fetch failed"
+// whose .cause carries `Error: connect ECONNREFUSED` / code UND_ERR_CONNECT_TIMEOUT).
+function errText(x: unknown): string {
+  if (!(x instanceof Error)) return String(x);
+  const code = (x as { code?: unknown }).code;
+  return `${x.name}: ${x.message}${code ? ` ${String(code)}` : ''}`;
+}
 function handledAsBenign(x: unknown): boolean {
-  const msg = x instanceof Error ? `${x.name}: ${x.message}` : String(x);
-  if (!BENIGN_NETWORK_RE.test(msg)) return false;
-  addBreadcrumb({ category: 'network', level: 'warning', message: msg });
+  const cause = x instanceof Error ? (x as { cause?: unknown }).cause : undefined;
+  const text = errText(x) + (cause ? ` ${errText(cause)}` : '');
+  if (!BENIGN_NETWORK_RE.test(text)) return false;
+  addBreadcrumb({ category: 'network', level: 'warning', message: errText(x) });
   const now = Date.now();
   if (now - lastBenignSentAt > 60_000) {
     lastBenignSentAt = now;
-    captureMessage(`client network error (sampled; others suppressed): ${msg}`, 'warning');
+    captureMessage(`client network error (sampled; others suppressed): ${errText(x)}`, 'warning');
   }
   return true;
 }
@@ -214,16 +246,18 @@ function installAutoInstrument(): void {
     g.__upmetricsFetchWrapped = true;
     g.fetch = async (...args: any[]) => {
       const url = typeof args[0] === 'string' ? args[0] : (args[0]?.url ?? '');
-      const own = Boolean(config && url.includes(config.parsed.endpoint));
+      // Never instrument our OWN ingest POST (infinite recursion), nor a
+      // denyUrls endpoint the app has opted out of (known-transient relay/poll).
+      const skip = Boolean(config && url.includes(config.parsed.endpoint)) || isDenied(url);
       try {
         const res = await orig(...args);
         // Only flag genuine server failures (5xx). Expected client statuses
         // (401/403/404) and opaque/no-cors responses (status 0) are normal app
         // traffic, not errors — capturing them floods the project with noise.
-        if (!own && res && res.status >= 500) captureMessage(`HTTP ${res.status} on ${url}`, 'warning');
+        if (!skip && res && res.status >= 500) captureMessage(`HTTP ${res.status} on ${url}`, 'warning');
         return res;
       } catch (err) {
-        if (!own && !handledAsBenign(err)) captureException(err);
+        if (!skip && !handledAsBenign(err)) captureException(err);
         throw err;
       }
     };
