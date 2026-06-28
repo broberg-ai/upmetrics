@@ -47,6 +47,9 @@ describe('evalCreditAlarm', () => {
     const inc = openCreditLow();
     expect(inc?.severity).toBe('high');
     expect(inc?.kind).toBe('credit_low');
+    // burn-rate travels with the alarm (AC: included in the alarm payload)
+    expect(inc?.eventsAtOpen).toHaveProperty('burn_rate_per_day');
+    expect(inc?.eventsAtOpen).toHaveProperty('days_left');
   });
 
   it('critical band → escalates the SAME incident to critical (no duplicate)', () => {

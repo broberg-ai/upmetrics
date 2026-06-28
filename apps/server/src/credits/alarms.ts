@@ -4,7 +4,7 @@
 import { and, eq } from 'drizzle-orm';
 import { config } from '../config';
 import { getDb, schema } from '../db';
-import type { CreditSnapshot } from './store';
+import { recentSnapshots, type CreditSnapshot } from './store';
 
 type Db = ReturnType<typeof getDb>;
 
@@ -71,6 +71,13 @@ export function evalCreditAlarm(db: Db, projectId: string, snapshot: CreditSnaps
   }
   const severity = SEVERITY[state];
   if (!open) {
+    // Include burn-rate in the alarm so "running out in ~N days" travels with the
+    // notification, not just the remaining number (AC: burn-rate in the alarm).
+    const br = burnRate(recentSnapshots(db, snapshot.provider, 2));
+    const daysLeft = br.days_left == null ? null : Math.round(br.days_left * 10) / 10;
+    const title =
+      `${snapshot.provider} credits low: $${snapshot.remaining.toFixed(2)} remaining` +
+      (daysLeft == null ? '' : ` (~${daysLeft}d left at current burn)`);
     db.insert(schema.incidents)
       .values({
         id: crypto.randomUUID(),
@@ -78,10 +85,10 @@ export function evalCreditAlarm(db: Db, projectId: string, snapshot: CreditSnaps
         kind: 'credit_low',
         status: 'open',
         severity,
-        title: `${snapshot.provider} credits low: $${snapshot.remaining.toFixed(2)} remaining`,
+        title,
         openedAt: now,
         triggerRef,
-        eventsAtOpen: { remaining: snapshot.remaining, state },
+        eventsAtOpen: { remaining: snapshot.remaining, state, burn_rate_per_day: br.per_day, days_left: daysLeft },
       })
       .run();
   } else if (open.severity !== severity) {
