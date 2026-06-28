@@ -54,6 +54,17 @@ export const config = {
   // off /api/cost/summary instead of hardcoding 6.9 — Christian's "én kilde"
   // rule. Env-overridable; bump if it drifts.
   usdToDkk: coerceNum('USD_TO_DKK', 6.9),
+  // F022 — OpenRouter credit-tracking. All ship-dark: empty secret → that surface
+  // is inert (no probe armed / endpoint 401s), never a half-wired prod surface.
+  // Write-side: the token the credit-snapshot ingest endpoint requires (probe/run
+  // token, NOT public). Empty → ingest 401s.
+  creditIngestToken: process.env.CREDIT_INGEST_TOKEN ?? '',
+  // OpenRouter management key (required by /api/v1/credits). Empty → the
+  // provider_balance probe stays disarmed (ship-dark).
+  openrouterManagementKey: process.env.OPENROUTER_MANAGEMENT_KEY ?? '',
+  // Read-side: scoped read-only Bearer for the F022.5 export-API (a consumer can
+  // read balance/usage but never write probes/alarms). Empty → export-API 401s.
+  exportReadToken: process.env.EXPORT_READ_TOKEN ?? '',
   // Lens mint secret (F016 — POST /api/lens-session). Bearer-gates minting a
   // short-lived read-only lens session for visual verification (fleet Lens
   // mint-endpoint standard). Empty → the mint endpoint is disabled (401).

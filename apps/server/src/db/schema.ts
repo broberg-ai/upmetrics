@@ -277,6 +277,29 @@ export const deployEvents = sqliteTable(
   ],
 );
 
+// ── credit_snapshots (F022) — provider prepaid-balance history ───────────────
+// Append-only history of a provider's own money truth (OpenRouter /credits now;
+// `provider` makes it multi-provider from day one). "Latest state" is just
+// SELECT … WHERE provider=? ORDER BY captured_at DESC LIMIT 1 — no synced
+// "current" table. remaining is derived (credits − usage) but STORED so the
+// balance + alarm queries stay a single cheap read. raw keeps the original
+// response for audit/debug. This is the money source; agent_runs stays the
+// spend/run source — the two are never conflated.
+export const creditSnapshots = sqliteTable(
+  'credit_snapshots',
+  {
+    id: text('id').primaryKey(),
+    provider: text('provider').notNull(), // 'openrouter'
+    totalCredits: real('total_credits').notNull(), // bought (USD)
+    totalUsage: real('total_usage').notNull(), // used (USD)
+    remaining: real('remaining').notNull(), // derived, stored
+    currency: text('currency').notNull().default('USD'),
+    capturedAt: integer('captured_at', { mode: 'timestamp_ms' }).notNull(),
+    raw: text('raw', { mode: 'json' }), // original provider response (audit)
+  },
+  (t) => [index('credit_snapshots_provider_idx').on(t.provider, t.capturedAt)],
+);
+
 // ── maintenance_windows (F008.3) ─────────────────────────────────────────────
 // A window silences matching alerts. project_id / kind NULL = wildcard (all).
 export const maintenanceWindows = sqliteTable(
