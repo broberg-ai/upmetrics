@@ -65,6 +65,10 @@ export const config = {
   // Read-side: scoped read-only Bearer for the F022.5 export-API (a consumer can
   // read balance/usage but never write probes/alarms). Empty → export-API 401s.
   exportReadToken: process.env.EXPORT_READ_TOKEN ?? '',
+  // F022.4 — low-balance alarm bands (USD remaining). warn → early heads-up,
+  // critical → urgent. v1: global defaults for all providers (per-provider map later).
+  creditWarnBelowUsd: coerceNum('CREDIT_WARN_BELOW_USD', 10),
+  creditCriticalBelowUsd: coerceNum('CREDIT_CRITICAL_BELOW_USD', 2),
   // Lens mint secret (F016 — POST /api/lens-session). Bearer-gates minting a
   // short-lived read-only lens session for visual verification (fleet Lens
   // mint-endpoint standard). Empty → the mint endpoint is disabled (401).
