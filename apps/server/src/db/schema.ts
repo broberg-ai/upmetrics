@@ -300,6 +300,22 @@ export const creditSnapshots = sqliteTable(
   (t) => [index('credit_snapshots_provider_idx').on(t.provider, t.capturedAt)],
 );
 
+// ── fx_rates (F023) — live FX rate history, rolling-5 fallback ────────────────
+// Append-only but pruned to the last 5 rows per pair (a continuous roll). The
+// live USD→DKK rate is fetched from a free no-key API; this table is the
+// fallback source (average of the last ≤5) when the API is unreachable, and it
+// survives restarts. Single source for every DKK conversion (cost-API + credits).
+export const fxRates = sqliteTable(
+  'fx_rates',
+  {
+    id: text('id').primaryKey(),
+    pair: text('pair').notNull(), // 'USD_DKK'
+    rate: real('rate').notNull(),
+    fetchedAt: integer('fetched_at', { mode: 'timestamp_ms' }).notNull(),
+  },
+  (t) => [index('fx_rates_pair_idx').on(t.pair, t.fetchedAt)],
+);
+
 // ── maintenance_windows (F008.3) ─────────────────────────────────────────────
 // A window silences matching alerts. project_id / kind NULL = wildcard (all).
 export const maintenanceWindows = sqliteTable(

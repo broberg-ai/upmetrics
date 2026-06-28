@@ -91,9 +91,9 @@ describe('GET /api/cost/summary', () => {
 
   it('publishes usd_to_dkk + a ready total_dkk (one-source FX for consumers)', async () => {
     const b = await json(await get('/api/cost/summary'));
-    expect(b.usd_to_dkk).toBe(config.usdToDkk); // the single published rate
-    // total_micro_usd 7000 → $0.007 → DKK round($0.007 * rate, øre)
-    expect(b.total_dkk).toBeCloseTo(Math.round((7000 / 1e6) * config.usdToDkk * 100) / 100, 5);
+    expect(b.usd_to_dkk).toBeGreaterThan(0); // live rate (F023): live → rolling-5 avg → default
+    // total_dkk consistent with the published rate: total_micro_usd/1e6 * usd_to_dkk, rounded to øre
+    expect(b.total_dkk).toBeCloseTo(Math.round((b.total_micro_usd / 1e6) * b.usd_to_dkk * 100) / 100, 5);
   });
 
   it('breakdowns by provider/model/tier/capability', async () => {

@@ -7,9 +7,12 @@ import { config } from '../config';
 import { getDb, schema } from '../db';
 import { insertSnapshot, latestSnapshot, recentSnapshots } from './store';
 import { alarmState, burnRate, thresholdsFor } from './alarms';
+import { usdToDkk } from '../fx/rate';
 
 const usd2 = (n: number): number => Math.round(n * 100) / 100; // money → cents, once
-const dkk2 = (usd: number): number => Math.round(usd * config.usdToDkk * 100) / 100;
+// Live USD→DKK (F023; usdToDkk() = live → rolling-5 avg → config default). Called
+// per-request so external callers always get the current rate.
+const dkk2 = (usd: number): number => Math.round(usd * usdToDkk() * 100) / 100;
 const MICRO = 1_000_000;
 
 // Constant-time compare. Empty expected secret → always false (ship-dark: the
@@ -75,7 +78,7 @@ export function registerCreditRoutes(app: Hono): void {
     if (denied) return denied;
     const provider = c.req.param('provider');
     const snap = latestSnapshot(getDb(), provider);
-    if (!snap) return c.json({ provider, has_data: false, usd_to_dkk: config.usdToDkk });
+    if (!snap) return c.json({ provider, has_data: false, usd_to_dkk: usdToDkk() });
     return c.json({
       provider,
       has_data: true,
@@ -83,7 +86,7 @@ export function registerCreditRoutes(app: Hono): void {
       total_usage_usd: usd2(snap.totalUsage),
       remaining_usd: usd2(snap.remaining),
       remaining_dkk: dkk2(snap.remaining),
-      usd_to_dkk: config.usdToDkk,
+      usd_to_dkk: usdToDkk(),
       currency: snap.currency,
       captured_at: snap.capturedAt,
       alarm: alarmState(snap.remaining, thresholdsFor(provider)),

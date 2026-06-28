@@ -12,6 +12,7 @@ import { timingSafeEqual } from 'node:crypto';
 import { eq, sql } from 'drizzle-orm';
 import { getDb, schema } from '../db';
 import { config } from '../config';
+import { usdToDkk } from '../fx/rate';
 
 type Db = ReturnType<typeof getDb>;
 
@@ -116,15 +117,16 @@ export function costSummary(db: Db, projectId: string, q: Record<string, string 
       COALESCE(SUM(CASE WHEN ${FREE} THEN 1 ELSE 0 END), 0) AS free_run_count
     FROM agent_runs WHERE ${where}
   `) as Record<string, number>[])[0] ?? {};
+  const rate = usdToDkk(); // F023 — live USD→DKK (sync; live → rolling-5 avg → default)
   const summary = {
     generated_at: new Date(now).toISOString(),
     window: { from: new Date(fromMs).toISOString(), to: new Date(toMs).toISOString() },
     total_micro_usd: microUsd(t.cost_usd),
-    // DKK companion off the single config rate. usd_to_dkk lets clients convert
-    // ANY micro_usd field (e.g. a ?tag.capability=tts slice); total_dkk is the
-    // ready headline, rounded ONCE to øre from the raw REAL sum.
-    usd_to_dkk: config.usdToDkk,
-    total_dkk: Math.round(Number(t.cost_usd ?? 0) * config.usdToDkk * 100) / 100,
+    // DKK companion off the LIVE rate (F023; usdToDkk() = live → rolling-5 avg →
+    // config default). usd_to_dkk lets clients convert ANY micro_usd field (e.g. a
+    // ?tag.capability=tts slice); total_dkk is the ready headline, rounded ONCE.
+    usd_to_dkk: rate,
+    total_dkk: Math.round(Number(t.cost_usd ?? 0) * rate * 100) / 100,
     input_tokens: Number(t.input_tokens),
     output_tokens: Number(t.output_tokens),
     cache_read_tokens: Number(t.cache_read_tokens),

@@ -29,14 +29,29 @@ export function usd(n: number): string {
   return `$${v.toPrecision(2).replace(/0+$/, '').replace(/\.$/, '')}`; // sub-cent → $0.000029
 }
 
-// Single source for the USD→DKK display rate. Approximate, static (set 2026-06-04);
-// the dashboard shows DKK only as an at-a-glance companion to the authoritative
-// USD, so a fixed rate is fine — bump this ONE constant if it drifts too far.
-export const USD_TO_DKK = 6.9;
+// USD→DKK display rate. The server is the single source of truth (F023 live rate
+// → rolling-5 avg → default); the dashboard fetches it via loadUsdToDkk() on boot
+// and dkk() reads the cached value. 6.9 is only the pre-load default.
+let usdToDkkRate = 6.9;
+
+export function setUsdToDkk(rate: number): void {
+  if (Number.isFinite(rate) && rate > 0) usdToDkkRate = rate;
+}
+
+// Pull the live rate from the server once (call on app boot). Silent on failure —
+// keeps the current value, so the dashboard never breaks if the endpoint is down.
+export async function loadUsdToDkk(): Promise<void> {
+  try {
+    const res = await fetch('/api/fx/usd-dkk');
+    if (res.ok) setUsdToDkk(Number((await res.json())?.rate));
+  } catch {
+    /* keep the current rate */
+  }
+}
 
 // DKK companion to usd(): "DKK 120,00". Prefix (like usd's "$") for consistency,
 // Danish formatting — period thousands + comma decimal, always 2 decimals.
 export function dkk(n: number): string {
-  const v = (n ?? 0) * USD_TO_DKK;
+  const v = (n ?? 0) * usdToDkkRate;
   return `DKK ${v.toLocaleString('da-DK', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 }

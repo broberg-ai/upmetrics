@@ -64,7 +64,8 @@ describe('export-API reads', () => {
     const b = await json(await get(`/api/v1/providers/${PROV}/balance`));
     expect(b.has_data).toBe(true);
     expect(b.remaining_usd).toBeCloseTo(15, 6);
-    expect(b.remaining_dkk).toBeCloseTo(Math.round(15 * config.usdToDkk * 100) / 100, 6);
+    expect(b.usd_to_dkk).toBeGreaterThan(0); // live rate (F023)
+    expect(b.remaining_dkk).toBeCloseTo(Math.round(b.remaining_usd * b.usd_to_dkk * 100) / 100, 2); // DKK consistent with the published rate
     expect(b.alarm).toBe('ok'); // 15 > warn 10
   });
 

@@ -69,6 +69,9 @@ export const config = {
   // critical → urgent. v1: global defaults for all providers (per-provider map later).
   creditWarnBelowUsd: coerceNum('CREDIT_WARN_BELOW_USD', 10),
   creditCriticalBelowUsd: coerceNum('CREDIT_CRITICAL_BELOW_USD', 2),
+  // F023 — how often the live USD→DKK rate is refreshed (source is daily, so 12h
+  // is plenty). usdToDkk (above) is the last-resort fallback default only.
+  fxRefreshIntervalMs: coerceInt('FX_REFRESH_INTERVAL_MS', 43_200_000), // 12h
   // Lens mint secret (F016 — POST /api/lens-session). Bearer-gates minting a
   // short-lived read-only lens session for visual verification (fleet Lens
   // mint-endpoint standard). Empty → the mint endpoint is disabled (401).

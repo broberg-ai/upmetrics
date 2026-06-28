@@ -15,6 +15,7 @@ import { registerDeployRoutes } from './deploys/routes';
 import { registerDeployRelayRoutes } from './deploys/relay';
 import { registerLensRoutes } from './auth/lens';
 import { registerCreditRoutes } from './credits/routes';
+import { registerFxRoutes } from './fx/routes';
 import { captureSelf } from './dogfood';
 
 export function createApp() {
@@ -32,6 +33,7 @@ export function createApp() {
   registerDeployRelayRoutes(app); // F019.7 — deploy-complete relay pull-feed (buddy polls, then stamps)
   registerLensRoutes(app); // F016 — Lens mint-endpoint (read-only visual-verification session)
   registerCreditRoutes(app); // F022 — provider credit-snapshot ingest + export-API
+  registerFxRoutes(app); // F023 — public live USD→DKK rate
 
   app.get('/health', (c) =>
     c.json({ status: 'ok', service: '@upmetrics/server', ts: Date.now() }),
