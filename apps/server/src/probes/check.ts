@@ -1,6 +1,11 @@
 // Probe check execution (F004.2). Runs the actual HTTP/keyword/tcp/ssl check
 // against probe.target. Called from the run endpoint (triggered by cronjobs).
+// F022.3 adds a provider_balance kind: it fetches the provider's prepaid balance
+// (OpenRouter /credits) and carries the parsed balance back so the run endpoint
+// can write a credit_snapshot.
 import type { schema } from '../db';
+import { config } from '../config';
+import { fetchOpenRouterBalance } from '../credits/openrouter';
 
 type Probe = typeof schema.probes.$inferSelect;
 
@@ -9,6 +14,9 @@ export interface CheckResult {
   responseMs?: number;
   statusCode?: number;
   error?: string;
+  // F022.3 — present on a successful provider_balance check; the run endpoint
+  // turns this into a credit_snapshot.
+  balance?: { totalCredits: number; totalUsage: number; raw: unknown };
 }
 
 export async function runCheck(probe: Probe): Promise<CheckResult> {
@@ -17,6 +25,7 @@ export async function runCheck(probe: Probe): Promise<CheckResult> {
   const start = Date.now();
 
   try {
+    if (probe.kind === 'provider_balance') return await balanceCheck(start, timeoutMs);
     if (probe.kind === 'tcp') return await tcpCheck(probe.target, timeoutMs, start);
 
     // http | keyword | ssl all go over an HTTP(S) request.
@@ -42,6 +51,22 @@ export async function runCheck(probe: Probe): Promise<CheckResult> {
     } finally {
       clearTimeout(t);
     }
+  } catch (err) {
+    return { ok: false, responseMs: Date.now() - start, error: err instanceof Error ? err.message : String(err) };
+  }
+}
+
+// F022.3 — provider_balance: poll OpenRouter /credits. Ship-dark: with no
+// management key the check fails benignly (it never registers in prod without
+// the key, so this is just a safety net). A fetch/parse failure → ok:false,
+// which the run endpoint treats like any probe failure (→ probe_down: "balance
+// unreadable"), distinct from the credit_low alarm (low-but-readable balance).
+async function balanceCheck(start: number, timeoutMs: number): Promise<CheckResult> {
+  const key = config.openrouterManagementKey;
+  if (!key) return { ok: false, responseMs: Date.now() - start, error: 'provider_balance disarmed: OPENROUTER_MANAGEMENT_KEY unset' };
+  try {
+    const { balance, raw } = await fetchOpenRouterBalance(key, { timeoutMs });
+    return { ok: true, responseMs: Date.now() - start, balance: { ...balance, raw } };
   } catch (err) {
     return { ok: false, responseMs: Date.now() - start, error: err instanceof Error ? err.message : String(err) };
   }

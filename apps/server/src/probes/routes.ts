@@ -9,6 +9,8 @@ import { config } from '../config';
 import { createProbeJob, deleteProbeJob } from './cronjobs';
 import { runCheck } from './check';
 import { parseTiers, severityForFailures, escalatedSeverity } from './escalation';
+import { insertSnapshot } from '../credits/store';
+import { evalCreditAlarm } from '../credits/alarms';
 
 function projectFromKey(c: Context) {
   const key = c.req.header('x-upmetrics-key');
@@ -170,6 +172,22 @@ export function registerProbeRoutes(app: Hono): void {
           }
         }
       }
+    }
+
+    // F022.3/F022.4 — provider_balance: on a successful poll, persist the
+    // credit_snapshot + evaluate the low-balance alarm. This is separate from the
+    // probe_down reachability incident above: probe_down = "balance unreadable",
+    // credit_low = "balance read fine, but it's running low".
+    if (probe.kind === 'provider_balance' && result.ok && result.balance) {
+      const provider = String((cfg.provider as string | undefined) ?? 'openrouter');
+      const snap = insertSnapshot(db, {
+        provider,
+        totalCredits: result.balance.totalCredits,
+        totalUsage: result.balance.totalUsage,
+        raw: result.balance.raw,
+        capturedAt: now,
+      });
+      evalCreditAlarm(db, probe.projectId, snap, now);
     }
 
     return c.json({ ok: result.ok, status_code: result.statusCode, response_ms: result.responseMs, error: result.error });

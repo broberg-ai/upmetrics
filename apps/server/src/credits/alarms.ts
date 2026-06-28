@@ -1,8 +1,12 @@
 // F022.4 — credit threshold alarms + burn-rate (pure logic). The export-API's
 // /alarms + /burn-rate read these; the proactive firing (Discord/webhook on a
 // band crossing) layers on top in the snapshot-write path.
+import { and, eq } from 'drizzle-orm';
 import { config } from '../config';
+import { getDb, schema } from '../db';
 import type { CreditSnapshot } from './store';
+
+type Db = ReturnType<typeof getDb>;
 
 export type AlarmState = 'ok' | 'warn' | 'critical';
 
@@ -41,4 +45,47 @@ export function burnRate(recent: CreditSnapshot[]): BurnRate {
   if (dtMs <= 0 || usageDelta <= 0) return { per_day: null, days_left: null };
   const perDay = usageDelta / (dtMs / 86_400_000);
   return { per_day: perDay, days_left: newest.remaining / perDay };
+}
+
+// Band → incident severity (incidents use critical|high|medium|low).
+const SEVERITY: Record<Exclude<AlarmState, 'ok'>, string> = { warn: 'high', critical: 'critical' };
+
+// F022.4 — proactive firing. Open/resolve a `credit_low` incident from a fresh
+// snapshot, reusing the incident → alert engine (dedup, Discord, generic webhook,
+// escalation, fleet roll-up) rather than re-rolling any of it. The incident
+// attaches to projectId (the provider_balance probe's project = the upmetrics-self
+// project). ok → resolve any open credit_low for this provider. A band change
+// (warn↔critical) updates severity; raising it re-alerts (the engine breaks dedup
+// on a severity bump). Returns the evaluated state.
+export function evalCreditAlarm(db: Db, projectId: string, snapshot: CreditSnapshot, now: Date = new Date()): AlarmState {
+  const state = alarmState(snapshot.remaining, thresholdsFor(snapshot.provider));
+  const triggerRef = `credit_low:${snapshot.provider}`;
+  const open = db
+    .select()
+    .from(schema.incidents)
+    .where(and(eq(schema.incidents.triggerRef, triggerRef), eq(schema.incidents.kind, 'credit_low'), eq(schema.incidents.status, 'open')))
+    .get();
+  if (state === 'ok') {
+    if (open) db.update(schema.incidents).set({ status: 'resolved', resolvedAt: now }).where(eq(schema.incidents.id, open.id)).run();
+    return state;
+  }
+  const severity = SEVERITY[state];
+  if (!open) {
+    db.insert(schema.incidents)
+      .values({
+        id: crypto.randomUUID(),
+        projectId,
+        kind: 'credit_low',
+        status: 'open',
+        severity,
+        title: `${snapshot.provider} credits low: $${snapshot.remaining.toFixed(2)} remaining`,
+        openedAt: now,
+        triggerRef,
+        eventsAtOpen: { remaining: snapshot.remaining, state },
+      })
+      .run();
+  } else if (open.severity !== severity) {
+    db.update(schema.incidents).set({ severity }).where(eq(schema.incidents.id, open.id)).run();
+  }
+  return state;
 }
