@@ -83,6 +83,11 @@ export const config = {
   agentFailureSpikeThreshold: coerceInt('AGENT_FAILURE_SPIKE_THRESHOLD', 5),
   // Alert engine (F005.2). Dedup window per (rule, incident, severity).
   alertDedupWindowMs: coerceInt('ALERT_DEDUP_WINDOW_MS', 3_600_000), // 1h
+  // credit_low is a slow-moving balance state (rarely changes hour-to-hour) —
+  // an hourly re-alert on an unchanged incident is just nagging. Escalation
+  // (severity increase) still re-alerts immediately via isDeduped's rank check;
+  // this only caps the "still open, unchanged" reminder to once/day (2026-07-01).
+  creditLowAlertDedupWindowMs: coerceInt('CREDIT_LOW_ALERT_DEDUP_WINDOW_MS', 86_400_000), // 24h
   // Remediation dispatcher (F005.3).
   remediationThreshold: process.env.REMEDIATION_THRESHOLD ?? 'medium', // min severity
   remediationRetries: coerceInt('REMEDIATION_RETRIES', 3),

@@ -98,8 +98,11 @@ function ruleMatches(rule: AlertRule, incident: Incident): boolean {
 
 // Deduped if this rule already fired for this incident inside the window at a
 // severity >= the current one. A higher (escalated) severity is NOT deduped.
+// credit_low gets a much longer window (F022.4 follow-up) — its state rarely
+// changes hour-to-hour, so a daily reminder is enough; escalation still bypasses.
 function isDeduped(db: Db, rule: AlertRule, incident: Incident, now: Date): boolean {
-  const since = new Date(now.getTime() - config.alertDedupWindowMs);
+  const windowMs = incident.kind === 'credit_low' ? config.creditLowAlertDedupWindowMs : config.alertDedupWindowMs;
+  const since = new Date(now.getTime() - windowMs);
   const recent = db
     .select()
     .from(schema.alertHistory)
