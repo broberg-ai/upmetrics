@@ -16,12 +16,15 @@ primary_region = "arn"
 
 # 256MB ran with ~7MB free (bun + sqlite page-cache + Litestream fill the box),
 # so any spike — a */5 probe burst, a Tigris S3 latency blip — starved memory →
-# event-loop freeze → health-check timeout → user-facing 503. 512MB gives real
-# slack. Single source of truth so a deploy never reverts to the 256MB default.
-# See docs/adr/0001 (2026-06-02 flap postmortem).
+# event-loop freeze → health-check timeout → user-facing 503. 512MB gave real
+# slack — until the DB grew to ~380MB (30-day retention across 11 fleet
+# projects, buddy alone ~95% of events): MemFree back down to ~5.5MB, 320k+
+# major page faults, same freeze → flap pattern recurring (2026-07-01). 1GB
+# gives real headroom again. Single source of truth so a deploy never reverts
+# the memory. See docs/adr/0001 (2026-06-02 flap postmortem).
 [[vm]]
   size = "shared-cpu-1x"
-  memory = "512mb"
+  memory = "1024mb"
 
 [http_service]
   internal_port = 8080
