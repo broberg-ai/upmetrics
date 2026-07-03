@@ -1,7 +1,10 @@
 // @upmetrics/sdk — error capture for browser/node/bun. Sends Sentry-format
 // envelopes to the Upmetrics ingest endpoint. PII-scrubbed by default.
-import { scrub } from './scrub';
-import { SDK_VERSION } from './version';
+// Explicit .js extensions on relative specifiers: the SDK ships raw tsc output
+// consumed directly by Node's ESM resolver, which REQUIRES the extension (Bun is
+// tolerant, which hid this until a Node-ESM consumer — Vite dev-SSR — hit it).
+import { scrub } from './scrub.js';
+import { SDK_VERSION } from './version.js';
 
 export interface InitOptions {
   dsn: string;
@@ -286,4 +289,4 @@ function installAutoInstrument(): void {
   }
 }
 
-export { scrub, maskString } from './scrub';
+export { scrub, maskString } from './scrub.js';
