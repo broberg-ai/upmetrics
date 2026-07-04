@@ -18,6 +18,16 @@ import { registerCreditRoutes } from './credits/routes';
 import { registerFxRoutes } from './fx/routes';
 import { captureSelf } from './dogfood';
 
+// Circuit breaker state: tracks event-loop responsiveness under load.
+// If /health endpoint itself takes >500ms (event loop under pressure), increment
+// slowResponseCount. When >= 3 consecutive slow responses, report "degraded"
+// so cronjobs can back off retries (avoid thundering herd).
+const circuitState = {
+  slowResponseCount: 0,
+  lastResponseTimeMs: 0,
+  openedAt: null as number | null,
+};
+
 export function createApp() {
   const app = new Hono();
 
@@ -35,9 +45,42 @@ export function createApp() {
   registerCreditRoutes(app); // F022 — provider credit-snapshot ingest + export-API
   registerFxRoutes(app); // F023 — public live USD→DKK rate
 
-  app.get('/health', (c) =>
-    c.json({ status: 'ok', service: '@upmetrics/server', ts: Date.now() }),
-  );
+  app.get('/health', (c) => {
+    const start = Date.now();
+    const result = { status: 'ok', service: '@upmetrics/server', ts: start };
+    const elapsed = Date.now() - start;
+    circuitState.lastResponseTimeMs = elapsed;
+
+    // If /health endpoint took >500ms, event loop is under pressure.
+    if (elapsed > 500) {
+      circuitState.slowResponseCount++;
+      if (circuitState.slowResponseCount === 1) {
+        circuitState.openedAt = start;
+      }
+    } else {
+      circuitState.slowResponseCount = 0;
+      circuitState.openedAt = null;
+    }
+
+    // Circuit OPEN: report degraded so clients (cronjobs) back off.
+    if (circuitState.slowResponseCount >= 3) {
+      return c.json(
+        {
+          ...result,
+          status: 'degraded',
+          reason: 'event_loop_under_pressure',
+          circuitState: {
+            slowResponseCount: circuitState.slowResponseCount,
+            lastResponseTimeMs: circuitState.lastResponseTimeMs,
+            openedAt: circuitState.openedAt,
+          },
+        },
+        503,
+      );
+    }
+
+    return c.json(result);
+  });
 
   // Better Auth handles all /api/auth/* routes (magic-link, session, callback).
   app.on(['GET', 'POST'], '/api/auth/*', (c) => auth.handler(c.req.raw));
