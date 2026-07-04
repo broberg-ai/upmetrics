@@ -82,6 +82,17 @@ export function createApp() {
     return c.json(result);
   });
 
+  // Fleet test fixture (cronjobs F007): a DETERMINISTIC 503 + Retry-After so a
+  // consumer can prove its "defer on Retry-After, don't alarm" path against a
+  // real upstream — no public endpoint reliably sets this header, this one
+  // always does. Harmless (returns no data), never wired to an uptime probe so
+  // it can't self-alarm, and deliberately NOT under /health so it can never
+  // interfere with Fly's health check.
+  app.get('/api/test/retry-after-503', (c) => {
+    c.header('Retry-After', '30');
+    return c.json({ test: 'retry-after-503', retry_after: 30 }, 503);
+  });
+
   // Better Auth handles all /api/auth/* routes (magic-link, session, callback).
   app.on(['GET', 'POST'], '/api/auth/*', (c) => auth.handler(c.req.raw));
 
