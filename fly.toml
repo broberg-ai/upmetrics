@@ -14,17 +14,19 @@ primary_region = "arn"
   source = "upmetrics_data"
   destination = "/data"
 
-# 256MB ran with ~7MB free (bun + sqlite page-cache + Litestream fill the box),
-# so any spike — a */5 probe burst, a Tigris S3 latency blip — starved memory →
-# event-loop freeze → health-check timeout → user-facing 503. 512MB gave real
-# slack — until the DB grew to ~380MB (30-day retention across 11 fleet
-# projects, buddy alone ~95% of events): MemFree back down to ~5.5MB, 320k+
-# major page faults, same freeze → flap pattern recurring (2026-07-01). 1GB
-# gives real headroom again. Single source of truth so a deploy never reverts
-# the memory. See docs/adr/0001 (2026-06-02 flap postmortem).
+# Memory has been bumped twice chasing a flap (256→512→1024) but RAM was only
+# ever the symptom. Real root cause (2026-07-05): a chatty project (buddy, ~97%
+# of events → DB at 750MB) + the correlation worker's per-project queries lacking
+# a (project_id, received_at) / (project_id, release, received_at) index → it
+# ROW-SCANNED ~218k rows every 30s. Warm that's ~0.5s; on a COLD cache (overnight
+# idle) it read those rows from disk → 16-35s → froze the sync event loop →
+# /health timeout → deadman page. Fixed at the root by migration 0014 (composite
+# indexes → the scans are now index seeks). 2GB stays as comfortable headroom for
+# the 750MB DB, not as the fix. Single source of truth so a deploy never reverts
+# the memory. See docs/adr/0001.
 [[vm]]
   size = "shared-cpu-1x"
-  memory = "1024mb"
+  memory = "2048mb"
 
 [http_service]
   internal_port = 8080

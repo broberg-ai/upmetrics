@@ -17,16 +17,12 @@ import { registerLensRoutes } from './auth/lens';
 import { registerCreditRoutes } from './credits/routes';
 import { registerFxRoutes } from './fx/routes';
 import { captureSelf } from './dogfood';
+import { eventLoopLagMs } from './ops/lag-gauge';
 
-// Circuit breaker state: tracks event-loop responsiveness under load.
-// If /health endpoint itself takes >500ms (event loop under pressure), increment
-// slowResponseCount. When >= 3 consecutive slow responses, report "degraded"
-// so cronjobs can back off retries (avoid thundering herd).
-const circuitState = {
-  slowResponseCount: 0,
-  lastResponseTimeMs: 0,
-  openedAt: null as number | null,
-};
+// F008 circuit breaker. When the event loop lags past this, /ready reports
+// degraded (503 + Retry-After) so a poller BACKS OFF instead of alarming.
+const READY_LAG_DEGRADED_MS = 2000; // >2s of event-loop lag = degraded
+const READY_RETRY_AFTER_S = 15; // "try again in 15s" — long enough to self-recover
 
 export function createApp() {
   const app = new Hono();
@@ -45,41 +41,27 @@ export function createApp() {
   registerCreditRoutes(app); // F022 — provider credit-snapshot ingest + export-API
   registerFxRoutes(app); // F023 — public live USD→DKK rate
 
-  app.get('/health', (c) => {
-    const start = Date.now();
-    const result = { status: 'ok', service: '@upmetrics/server', ts: start };
-    const elapsed = Date.now() - start;
-    circuitState.lastResponseTimeMs = elapsed;
+  // Liveness (Fly health check). Pure: 200 whenever the process can answer at
+  // all. It must NEVER 503 for mere pressure — a 503 here makes Fly pull our
+  // ONLY instance from the proxy → a self-inflicted user-facing outage. Degraded
+  // state belongs on /ready (below), not here. lag_ms is exposed for observability.
+  app.get('/health', (c) =>
+    c.json({ status: 'ok', service: '@upmetrics/server', ts: Date.now(), lag_ms: Math.round(eventLoopLagMs()) }),
+  );
 
-    // If /health endpoint took >500ms, event loop is under pressure.
-    if (elapsed > 500) {
-      circuitState.slowResponseCount++;
-      if (circuitState.slowResponseCount === 1) {
-        circuitState.openedAt = start;
-      }
-    } else {
-      circuitState.slowResponseCount = 0;
-      circuitState.openedAt = null;
+  // Readiness (F008 circuit breaker). For a poller (the cronjobs deadman) that
+  // should DEFER, not alarm, while we're briefly degraded. When the event loop
+  // recently stalled (a heavy sync query on a cold cache), report 503 + Retry-After
+  // → the deadman treats it as "try again soon" (its F007 defer-on-Retry-After
+  // path) instead of paging. A true hang makes THIS time out too → then it pages,
+  // which is correct. Separate from /health so Fly's liveness is never affected.
+  app.get('/ready', (c) => {
+    const lag = Math.round(eventLoopLagMs());
+    if (lag > READY_LAG_DEGRADED_MS) {
+      c.header('Retry-After', String(READY_RETRY_AFTER_S));
+      return c.json({ status: 'degraded', reason: 'event_loop_lag', lag_ms: lag, retry_after: READY_RETRY_AFTER_S }, 503);
     }
-
-    // Circuit OPEN: report degraded so clients (cronjobs) back off.
-    if (circuitState.slowResponseCount >= 3) {
-      return c.json(
-        {
-          ...result,
-          status: 'degraded',
-          reason: 'event_loop_under_pressure',
-          circuitState: {
-            slowResponseCount: circuitState.slowResponseCount,
-            lastResponseTimeMs: circuitState.lastResponseTimeMs,
-            openedAt: circuitState.openedAt,
-          },
-        },
-        503,
-      );
-    }
-
-    return c.json(result);
+    return c.json({ status: 'ready', lag_ms: lag });
   });
 
   // Fleet test fixture (cronjobs F007): a DETERMINISTIC 503 + Retry-After so a

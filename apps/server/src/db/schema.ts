@@ -52,7 +52,23 @@ export const events = sqliteTable(
     environment: text('environment'),
     tags: text('tags', { mode: 'json' }),
   },
-  (t) => [index('events_project_idx').on(t.projectId), index('events_issue_idx').on(t.issueId)],
+  (t) => [
+    index('events_project_idx').on(t.projectId),
+    index('events_issue_idx').on(t.issueId),
+    // The correlation worker counts errors per project inside a time window every
+    // 30s (WHERE project_id=? AND received_at>=?). Without the time column in the
+    // index it index-seeks project_id then row-scans ALL of that project's rows —
+    // a noisy project (200k+ rows) froze the sync event loop on a cold cache.
+    // Composite (project_id, received_at) makes it a range-seek. (F008 flap fix.)
+    index('events_project_received_idx').on(t.projectId, t.receivedAt),
+    // Same worker also detects recent deploys: per project, the min(received_at)
+    // per release (WHERE project_id=? AND release IS NOT NULL GROUP BY release).
+    // With only project_id indexed that GROUP BY builds a temp b-tree over ALL of
+    // the project's rows (218k+ for a chatty project → cold-cache freeze). Leading
+    // the index with (project_id, release) lets SQLite satisfy the GROUP BY from
+    // index order — no temp b-tree, min = first row per group. (F008 flap fix.)
+    index('events_project_release_received_idx').on(t.projectId, t.release, t.receivedAt),
+  ],
 );
 
 // ── issues (deduplicated error groups) ──────────────────────────────────────
@@ -123,6 +139,10 @@ export const agentRuns = sqliteTable(
     index('agent_runs_session_idx').on(t.sessionId),
     index('agent_runs_name_idx').on(t.agentName),
     uniqueIndex('agent_runs_idem_idx').on(t.projectId, t.idempotencyKey),
+    // Same as events: the correlation worker counts agent failures per project in
+    // a time window every 30s (WHERE project_id=? AND started_at>=?). Composite
+    // index makes it a range-seek instead of a per-project row scan. (F008.)
+    index('agent_runs_project_started_idx').on(t.projectId, t.startedAt),
   ],
 );
 
