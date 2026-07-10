@@ -35,8 +35,11 @@ jobs:
           registry-url: https://registry.npmjs.org
 
       # OIDC trusted publishing needs npm CLI >= 11.5.1; node 22 still ships 10.x.
+      # PIN 11.5.1 exactly — npm@latest now resolves to v12, which breaks
+      # `npm publish --provenance` with "Cannot find module 'sigstore'" (fleet-wide
+      # CI break flagged by components 2026-07-10). Don't float back to @latest.
       - name: Upgrade npm
-        run: npm install -g npm@latest
+        run: npm install -g npm@11.5.1
 
       - name: Install
         run: pnpm install --frozen-lockfile
