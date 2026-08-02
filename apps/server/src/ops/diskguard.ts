@@ -96,20 +96,26 @@ const gb = (n: number) => `${(n / 1_073_741_824).toFixed(2)} GB`;
 // Straight to Discord — no DB read, no DB write, no alert_rules lookup. An
 // alarm that needs a successful write to be delivered fails at exactly the
 // moment it is needed.
+// `note` exists so the alarm can be proven on demand without ever touching prod
+// config: a temporary threshold change has to be put BACK, and that step can be
+// missed — which would leave the guard alarming on everything, a new failure
+// introduced by the act of verifying. A marked one-off carries no such step.
 export async function sendDiskAlert(
   band: Exclude<DiskBand, 'ok'>,
   u: DiskUsage,
   wal: number,
   webhook: string = config.fleetAlertDiscordWebhook,
+  note?: string,
 ): Promise<boolean> {
   if (!webhook) return false; // ship-dark: inert until the secret is set
-  const title = `[${band.toUpperCase()}] upmetrics disk ${u.usedPct.toFixed(1)}% full`;
+  const title = `${note ? `${note} ` : ''}[${band.toUpperCase()}] upmetrics disk ${u.usedPct.toFixed(1)}% full`;
   const body =
     `${gb(u.usedBytes)} used of ${gb(u.totalBytes)} · ${gb(u.availBytes)} free\n` +
     `WAL: ${(wal / 1_048_576).toFixed(0)} MB (cap ${(config.walCapBytes / 1_048_576).toFixed(0)} MB)\n` +
     (band === 'critical'
       ? 'At 100% SQLite can neither checkpoint nor DELETE — it cannot recover on its own. Extend the volume now.'
-      : 'Headroom shrinking. Check retention + WAL before it reaches critical.');
+      : 'Headroom shrinking. Check retention + WAL before it reaches critical.') +
+    (note ? `\n\n${note} Synthetic values — no real disk problem. Verifying the alarm path only.` : '');
   try {
     const res = await fetch(webhook, {
       method: 'POST',
