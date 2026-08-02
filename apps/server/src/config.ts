@@ -120,6 +120,25 @@ export const config = {
   walCapBytes: coerceInt('WAL_CAP_BYTES', 67_108_864), // 64 MB
   // Ops hardening (F007).
   retentionIntervalMs: coerceInt('RETENTION_INTERVAL_MS', 86_400_000), // daily compaction
+  // F025.2 — per-project event cap. Time-based retention alone does NOT bound
+  // size: one noisy sender flooded 163k events (552 MB) inside its 30-day
+  // window and became 96% of the whole database, crowding out the rest of the
+  // fleet's error history. The cap is the ceiling time can't provide — oldest
+  // events beyond it are pruned regardless of age. 0 disables.
+  maxEventsPerProject: coerceInt('MAX_EVENTS_PER_PROJECT', 50_000),
+  // Work budget per tick for the cap. Two opposing constraints: bun:sqlite is
+  // synchronous, so an unbounded one-shot prune blocks the event loop (the
+  // 2026-06-02 stall class) — but a budget that drains slower than a flood
+  // arrives is not a ceiling at all. The observed flood was ~27k events/day,
+  // so a daily 20k budget would LOSE ground. 50k drains faster than any flood
+  // we have seen while staying batched (50 × 1k transactions, sub-second) and
+  // does zero work at all while a project is under its cap — which is normal.
+  retentionCapBudgetPerTick: coerceInt('RETENTION_CAP_BUDGET_PER_TICK', 50_000),
+  // Delay before the FIRST retention pass after boot. Previously retention ran
+  // only on setInterval, so the first pass was 24h after start — a server that
+  // restarts more often than daily would never prune at all. Running it at boot
+  // fixes that; the short delay lets the server start serving first.
+  retentionBootDelayMs: coerceInt('RETENTION_BOOT_DELAY_MS', 60_000), // 60s
   retentionBatchSize: coerceInt('RETENTION_BATCH_SIZE', 1000), // batched deletes (no long lock)
   probeCompactionDays: coerceInt('PROBE_COMPACTION_DAYS', 7), // downsample probe_results to hourly after
   ingestWarnIntervalMs: coerceInt('INGEST_WARN_INTERVAL_MS', 60_000), // dedup the over-limit warning event
