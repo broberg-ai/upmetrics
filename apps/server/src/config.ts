@@ -2,6 +2,7 @@
 // Secrets come from fly secrets (prod) / .env.local (dev); never hardcoded.
 // Integer/float parsing + the production secret-guard come from @broberg/config
 // (F021.2; coerceNum added upstream in @broberg/config@0.2.0 — the gap we filed).
+import { dirname } from 'node:path';
 import { coerceInt, coerceNum, productionGuard } from '@broberg/config';
 
 export const config = {
@@ -102,6 +103,21 @@ export const config = {
   fleetAlertDiscordWebhook: process.env.FLEET_ALERT_DISCORD_WEBHOOK ?? '', // roll-up + digest target
   alertRateCapacity: coerceInt('ALERT_RATE_CAPACITY', 10), // global token bucket per window
   alertDigestIntervalMs: coerceInt('ALERT_DIGEST_INTERVAL_MS', 600_000), // 10 min min between digests
+  // F025 — disk-guard + WAL safety valve. Born from the 2026-07-30→08-02 outage:
+  // `wal_autocheckpoint = 0` (db/index.ts) left Litestream the only checkpointer,
+  // but it checkpoints via a shadow WAL on the SAME volume — so it needs free
+  // space to free space. The WAL ate the headroom, /data hit 100%, and SQLite
+  // could then neither checkpoint nor DELETE: a deadlock with no self-recovery.
+  // Directory whose free space is watched (the Fly volume, derived from the db path).
+  dataDir: dirname(process.env.DATABASE_PATH ?? './local.db'),
+  // Alarm bands. Deliberately well below 100%: at 100% there is no cheap way out.
+  diskWarnPct: coerceNum('DISK_WARN_PCT', 70),
+  diskCriticalPct: coerceNum('DISK_CRITICAL_PCT', 85),
+  diskGuardIntervalMs: coerceInt('DISK_GUARD_INTERVAL_MS', 300_000), // 5m
+  diskAlertRealertMs: coerceInt('DISK_ALERT_REALERT_MS', 21_600_000), // 6h — no alarm storm
+  // WAL cap. Over this, take ONE wal_checkpoint(TRUNCATE) from the worker (never
+  // inline in a request — that stall is what 2026-06-02 removed and must stay gone).
+  walCapBytes: coerceInt('WAL_CAP_BYTES', 67_108_864), // 64 MB
   // Ops hardening (F007).
   retentionIntervalMs: coerceInt('RETENTION_INTERVAL_MS', 86_400_000), // daily compaction
   retentionBatchSize: coerceInt('RETENTION_BATCH_SIZE', 1000), // batched deletes (no long lock)

@@ -18,6 +18,7 @@ import { registerCreditRoutes } from './credits/routes';
 import { registerFxRoutes } from './fx/routes';
 import { captureSelf } from './dogfood';
 import { eventLoopLagMs } from './ops/lag-gauge';
+import { lastDiskUsage, bandFor } from './ops/diskguard';
 
 // F008 circuit breaker. When the event loop lags past this, /ready reports
 // degraded (503 + Retry-After) so a poller BACKS OFF instead of alarming.
@@ -45,9 +46,29 @@ export function createApp() {
   // all. It must NEVER 503 for mere pressure — a 503 here makes Fly pull our
   // ONLY instance from the proxy → a self-inflicted user-facing outage. Degraded
   // state belongs on /ready (below), not here. lag_ms is exposed for observability.
-  app.get('/health', (c) =>
-    c.json({ status: 'ok', service: '@upmetrics/server', ts: Date.now(), lag_ms: Math.round(eventLoopLagMs()) }),
-  );
+  // disk: last diskguard measurement (F025.1). Cached, so this stays a pure
+  // in-memory read — and it is visible even when the DB is unwritable, which is
+  // exactly when someone is looking.
+  app.get('/health', (c) => {
+    const d = lastDiskUsage();
+    return c.json({
+      status: 'ok',
+      service: '@upmetrics/server',
+      ts: Date.now(),
+      lag_ms: Math.round(eventLoopLagMs()),
+      ...(d
+        ? {
+            disk: {
+              used_pct: Number(d.usedPct.toFixed(1)),
+              avail_bytes: d.availBytes,
+              wal_bytes: d.walBytes,
+              band: bandFor(d.usedPct),
+              measured_at: d.at,
+            },
+          }
+        : {}),
+    });
+  });
 
   // Readiness (F008 circuit breaker). For a poller (the cronjobs deadman) that
   // should DEFER, not alarm, while we're briefly degraded. When the event loop

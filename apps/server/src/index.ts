@@ -3,6 +3,7 @@ import { createApp } from './app';
 import { config } from './config';
 import { startCorrelationWorker } from './incidents/correlation';
 import { startRetentionWorker } from './ops/retention';
+import { startDiskGuardWorker } from './ops/diskguard';
 import { startFxWorker } from './fx/rate';
 import { startLagGauge } from './ops/lag-gauge';
 import { initDogfood } from './dogfood';
@@ -17,6 +18,10 @@ startCorrelationWorker();
 
 // F007.1: daily retention + compaction (events purge, agent_runs, probe downsample).
 startRetentionWorker();
+
+// F025.1/.3: watch /data headroom and cap the WAL. Runs once at boot, then on
+// interval — the 2026-07-30 outage was a disk that filled with nothing watching.
+startDiskGuardWorker();
 
 // F023: live USD→DKK rate — refresh on boot + every 12h (rolling-5 fallback).
 startFxWorker();
