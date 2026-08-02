@@ -1,0 +1,75 @@
+name: ci
+
+# The harness gate (F025). Before this existed, NOTHING forced the tests to run
+# before a deploy: `fly deploy` ran straight from a laptop, so a red test could
+# ship unnoticed. That is the exact hole the 2026-07-30 outage lived in — the
+# WAL had no cap, and no automated check would have complained.
+#
+# The contract: `deploy` DEPENDS ON `test`. One red test blocks the release.
+# Never add `continue-on-error`, never `--no-verify`, never skip. A red test
+# means the wire is broken — fix the wire, not the gate.
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+concurrency:
+  # One deploy at a time; a newer push supersedes an in-flight run.
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    name: typecheck + test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+
+      - run: pnpm install --frozen-lockfile
+
+      - name: typecheck
+        run: pnpm typecheck
+
+      # `turbo run test` → apps/server (`bun test src/`) + packages/sdk
+      # (`bun test test/`). Both are scoped on purpose: an unscoped `bun test`
+      # from the repo root also picks up gitignored dist/ copies and reports
+      # ~41 phantom failures, which trains everyone to ignore red.
+      - name: test
+        run: pnpm test
+
+  deploy:
+    name: deploy to fly (arn)
+    needs: test # ← THE GATE. Red tests ⇒ no deploy.
+    if: github.ref == 'refs/heads/main' && github.event_name != 'pull_request'
+    runs-on: ubuntu-latest
+    concurrency: deploy-upmetrics # never two deploys of the same app at once
+    steps:
+      - uses: actions/checkout@v4
+      - uses: superfly/flyctl-actions/setup-flyctl@master
+      - run: flyctl deploy --remote-only
+        env:
+          FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN }}
+
+      # curl 200 is not proof a deploy is healthy, but an unhealthy /health IS
+      # proof it is not. Cheap post-deploy smoke so a broken boot fails loudly
+      # here instead of being discovered by a human days later.
+      - name: smoke — /health answers ok
+        run: |
+          for i in 1 2 3 4 5; do
+            body=$(curl -fsS --max-time 10 https://upmetrics.org/health) && \
+              echo "$body" | grep -q '"status":"ok"' && \
+              echo "healthy: $body" && exit 0
+            echo "attempt $i not healthy yet; retrying..."; sleep 6
+          done
+          echo "::error::/health did not report ok after deploy"; exit 1
