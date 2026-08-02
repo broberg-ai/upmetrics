@@ -32,7 +32,30 @@ export interface InitOptions {
    * for this case: it scopes by endpoint, so a real timeout elsewhere still surfaces.
    */
   denyUrls?: Array<string | RegExp>;
+  /**
+   * Cap on the breadcrumb trail attached to each event. Default 10.
+   *
+   * Why this is small by default: the buffer is scope-global and was attached
+   * to EVERY event with a hardcoded 50-entry cap. During an error flood the 50
+   * slots fill with the SAME repeated error, so each event carries ~50
+   * redundant copies of its own neighbours — self-reinforcing: the worse the
+   * flood, the fatter every event. A real incident (2026-07-05) produced 163k
+   * events at ~3.4 KB each = 552 MB, which was 96% of the whole server
+   * database and filled its disk. At ~500 B/event the same flood would have
+   * been tens of MB. 0 disables breadcrumbs entirely.
+   */
+  maxBreadcrumbs?: number;
+  /**
+   * Last-chance hook before an event is sent. Return the (possibly modified)
+   * event to send it, or `null` to drop it. Runs after scrubbing, on every
+   * path. Exists so a consumer can trim or veto payloads themselves instead of
+   * having to patch this package — the gap that made the 2026-07-05 flood
+   * un-fixable from the consumer side.
+   */
+  beforeSend?: (event: Record<string, unknown>) => Record<string, unknown> | null;
 }
+
+const DEFAULT_MAX_BREADCRUMBS = 10;
 
 interface Dsn {
   endpoint: string;
@@ -60,6 +83,10 @@ function parseDsn(dsn: string): Dsn {
 
 export function init(options: InitOptions): void {
   config = { ...options, parsed: parseDsn(options.dsn) };
+  // Start from a clean trail. The buffer is module-global and was never reset,
+  // so a re-init inherited whatever the previous configuration had collected —
+  // including crumbs captured under a different maxBreadcrumbs or DSN.
+  scope.breadcrumbs.length = 0;
   if (options.autoInstrument !== false) installAutoInstrument();
   // Emit one lightweight startup event per JS context so a surface + its SDK
   // version show up in the dashboard from boot — even if it never errors.
@@ -80,9 +107,35 @@ export function setTag(key: string, value: string): void {
   scope.tags[key] = value;
 }
 
+// Identity of a crumb ignoring its timestamp — two crumbs describing the same
+// thing must collapse even though they happened at different moments.
+function crumbKey(crumb: Record<string, unknown>): string {
+  const { timestamp: _t, count: _c, ...rest } = crumb;
+  try {
+    return JSON.stringify(rest);
+  } catch {
+    return String(rest);
+  }
+}
+
 export function addBreadcrumb(crumb: Record<string, unknown>): void {
-  scope.breadcrumbs.push({ timestamp: Date.now() / 1000, ...crumb });
-  if (scope.breadcrumbs.length > 50) scope.breadcrumbs.shift();
+  const limit = config?.maxBreadcrumbs ?? DEFAULT_MAX_BREADCRUMBS;
+  if (limit <= 0) {
+    scope.breadcrumbs.length = 0;
+    return;
+  }
+  const entry = { timestamp: Date.now() / 1000, ...crumb };
+  // Collapse a repeat of the immediately preceding crumb into a count. In a
+  // flood the trail is otherwise N copies of one identical line — the exact
+  // shape that turned an 80 MB incident into 552 MB.
+  const last = scope.breadcrumbs[scope.breadcrumbs.length - 1];
+  if (last && crumbKey(last) === crumbKey(entry)) {
+    last.count = (typeof last.count === 'number' ? last.count : 1) + 1;
+    last.timestamp = entry.timestamp; // most recent occurrence
+    return;
+  }
+  scope.breadcrumbs.push(entry);
+  while (scope.breadcrumbs.length > limit) scope.breadcrumbs.shift();
 }
 
 function uuid(): string {
@@ -100,7 +153,9 @@ function parseStack(stack: string | undefined): Array<Record<string, unknown>> {
   return frames.reverse();
 }
 
-function baseEvent(): Record<string, unknown> {
+// includeBreadcrumbs=false for AUTO-captured events: "HTTP 502 on <url>" gains
+// nothing from a trail of its own repeats, while a real captureException does.
+function baseEvent(includeBreadcrumbs = true): Record<string, unknown> {
   return {
     event_id: uuid(),
     timestamp: Date.now() / 1000,
@@ -112,7 +167,7 @@ function baseEvent(): Record<string, unknown> {
     sdk: { name: '@upmetrics/sdk', version: SDK_VERSION },
     tags: { ...scope.tags },
     user: scope.user,
-    breadcrumbs: scope.breadcrumbs.length ? [...scope.breadcrumbs] : undefined,
+    breadcrumbs: includeBreadcrumbs && scope.breadcrumbs.length ? [...scope.breadcrumbs] : undefined,
   };
 }
 
@@ -161,12 +216,33 @@ export function captureMessage(message: string, level = 'info'): string | null {
   return send({ ...baseEvent(), level, message });
 }
 
+// Auto-instrument's own channel. Identical to captureMessage except it attaches
+// NO breadcrumb trail: these fire from inside the fetch/error hooks, so during a
+// flood the trail is just copies of the very error being reported.
+function autoCaptureMessage(message: string, level = 'info'): string | null {
+  if (isIgnored(message)) return null;
+  return send({ ...baseEvent(false), level, message });
+}
+
 function send(event: Record<string, unknown>): string | null {
   if (!config) {
     if (typeof console !== 'undefined') console.warn('[upmetrics] not initialized; call init() first');
     return null;
   }
-  const payload = config.disableScrub ? event : scrub(event);
+  const scrubbed = config.disableScrub ? event : scrub(event);
+  // Consumer's last-chance veto/trim. Runs after scrubbing so a hook never sees
+  // raw PII. A throwing hook must not take the host app down with it — telemetry
+  // is never allowed to be the thing that breaks production.
+  let payload: Record<string, unknown> = scrubbed;
+  if (config.beforeSend) {
+    try {
+      const out = config.beforeSend(scrubbed);
+      if (!out) return null; // vetoed
+      payload = out;
+    } catch {
+      payload = scrubbed; // hook failed → send the un-hooked event rather than nothing
+    }
+  }
   const { endpoint, publicKey, projectId } = config.parsed;
   const url = `${endpoint}/api/${projectId}/envelope/?sentry_key=${publicKey}`;
   const body =
@@ -219,7 +295,7 @@ function handledAsBenign(x: unknown): boolean {
   const now = Date.now();
   if (now - lastBenignSentAt > 60_000) {
     lastBenignSentAt = now;
-    captureMessage(`client network error (sampled; others suppressed): ${errText(x)}`, 'warning');
+    autoCaptureMessage(`client network error (sampled; others suppressed): ${errText(x)}`, 'warning');
   }
   return true;
 }
@@ -233,7 +309,7 @@ function installAutoInstrument(): void {
       if (e?.error) {
         if (!handledAsBenign(e.error)) captureException(e.error);
       } else if (e?.message) {
-        if (!handledAsBenign(e.message)) captureMessage(String(e.message), 'error');
+        if (!handledAsBenign(e.message)) autoCaptureMessage(String(e.message), 'error');
       }
     });
     g.addEventListener('unhandledrejection', (e: any) => {
@@ -257,7 +333,7 @@ function installAutoInstrument(): void {
         // Only flag genuine server failures (5xx). Expected client statuses
         // (401/403/404) and opaque/no-cors responses (status 0) are normal app
         // traffic, not errors — capturing them floods the project with noise.
-        if (!skip && res && res.status >= 500) captureMessage(`HTTP ${res.status} on ${url}`, 'warning');
+        if (!skip && res && res.status >= 500) autoCaptureMessage(`HTTP ${res.status} on ${url}`, 'warning');
         return res;
       } catch (err) {
         if (!skip && !handledAsBenign(err)) captureException(err);
