@@ -152,10 +152,9 @@ export function __resetDiskGuardState(): void {
 const RANK: Record<DiskBand, number> = { ok: 0, warn: 1, critical: 2 };
 
 export async function diskGuardTick(now: number = Date.now()): Promise<DiskGuardTickResult> {
-  const usage = diskUsage();
-  const band = bandFor(usage.usedPct);
-
-  // Valve first: it is the one action that can still give space back.
+  // Valve FIRST, and independently of the disk measurement. It is the one action
+  // that can still hand space back, so it must not be skipped just because
+  // statfs failed — the two guards deliberately do not depend on each other.
   let wal: WalCheckpointResult;
   try {
     wal = checkpointWalIfOversized();
@@ -167,8 +166,19 @@ export async function diskGuardTick(now: number = Date.now()): Promise<DiskGuard
     }
   } catch (err) {
     console.error('[diskguard] wal checkpoint failed:', err);
-    wal = { ran: false, beforeBytes: walSizeBytes(), afterBytes: walSizeBytes() };
+    const size = walSizeBytes();
+    wal = { ran: false, beforeBytes: size, afterBytes: size };
   }
+
+  let usage: DiskUsage;
+  try {
+    usage = diskUsage();
+  } catch (err) {
+    // Never let a failed measurement take the worker (and thus the valve) down.
+    console.error('[diskguard] disk measurement failed:', err);
+    return { usage: { totalBytes: 0, usedBytes: 0, availBytes: 0, usedPct: 0 }, band: 'ok', wal, alerted: false };
+  }
+  const band = bandFor(usage.usedPct);
 
   let alerted = false;
   if (band !== 'ok') {
