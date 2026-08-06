@@ -181,7 +181,15 @@ export function costTimeseries(db: Db, projectId: string, q: Record<string, stri
 // from the raw SUM (round-once-at-boundary, trail pitfall #3).
 export function costFleet(db: Db, q: Record<string, string | undefined>, now: number) {
   const { fromMs, toMs } = resolveWindow({ ...q, window: q.window ?? 'day' }, now);
-  const span = sql`started_at >= ${fromMs} AND started_at < ${toMs}`;
+  // Same optional predicates as buildWhere (provider/model/tier/agent_name) but
+  // NO project scope — fleet stays cross-project. One joined expr reused in both
+  // queries below so the per-agent breakdown and the grand total stay consistent.
+  const parts = [sql`started_at >= ${fromMs}`, sql`started_at < ${toMs}`];
+  if (q.provider) parts.push(sql`provider = ${q.provider}`);
+  if (q.model) parts.push(sql`model = ${q.model}`);
+  if (q.tier) parts.push(sql`tier = ${q.tier}`);
+  if (q.agent_name) parts.push(sql`agent_name = ${q.agent_name}`);
+  const span = sql.join(parts, sql` AND `);
   const rows = db.all(sql`
     SELECT agent_name AS agent_name, COUNT(*) AS run_count,
       COALESCE(SUM(cost_usd), 0) AS cost_usd,

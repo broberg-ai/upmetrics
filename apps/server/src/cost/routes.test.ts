@@ -59,6 +59,8 @@ beforeAll(() => {
     .run();
   run({ projectId: 'fleettest', agentName: 'buddy', costUsd: 3.0, tags: { transport: 'http' } });
   run({ projectId: 'fleettest', agentName: 'trail', costUsd: 1.5, tags: { transport: 'http' } });
+  // one mistral run (distinct agent) so the fleet provider-filter can prove isolation (F024)
+  run({ projectId: 'fleettest', agentName: 'cms', provider: 'mistral', model: 'mistral-large-latest', costUsd: 2.0, tags: { transport: 'http' } });
 
   registerCostRoutes(app);
 });
@@ -180,5 +182,21 @@ describe('GET /api/cost/fleet (org read-token, cross-project per-agent)', () => 
     const b = await json(await getFleet('/api/cost/fleet?window=1d'));
     const span = new Date(b.window.to).getTime() - new Date(b.window.from).getTime();
     expect(span).toBe(86_400_000);
+  });
+
+  it('provider filter isolates one provider across the fleet (F024)', async () => {
+    const agents = (b: any) => Object.fromEntries(b.by_agent.map((a: any) => [a.agent_name, a]));
+    const all = await json(await getFleet('/api/cost/fleet?window=1d'));
+    const mistral = await json(await getFleet('/api/cost/fleet?window=1d&provider=mistral'));
+    // unfiltered sees the anthropic agents; provider=mistral excludes them
+    expect(agents(all).buddy).toBeDefined();
+    expect(agents(mistral).buddy).toBeUndefined();
+    expect(agents(mistral).trail).toBeUndefined();
+    // only the mistral run (agent 'cms') survives, and it's the sole spend
+    expect(agents(mistral).cms.micro_usd).toBe(2_000_000);
+    // total reflects only mistral spend AND equals the sum of the filtered by_agent
+    const sum = mistral.by_agent.reduce((n: number, a: any) => n + a.micro_usd, 0);
+    expect(mistral.total_micro_usd).toBe(sum);
+    expect(mistral.total_micro_usd).toBe(2_000_000);
   });
 });
