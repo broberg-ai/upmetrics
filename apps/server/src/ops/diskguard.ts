@@ -108,20 +108,42 @@ export async function sendDiskAlert(
   note?: string,
 ): Promise<boolean> {
   if (!webhook) return false; // ship-dark: inert until the secret is set
-  const title = `${note ? `${note} ` : ''}[${band.toUpperCase()}] upmetrics disk ${u.usedPct.toFixed(1)}% full`;
-  const body =
-    `${gb(u.usedBytes)} used of ${gb(u.totalBytes)} · ${gb(u.availBytes)} free\n` +
-    `WAL: ${(wal / 1_048_576).toFixed(0)} MB (cap ${(config.walCapBytes / 1_048_576).toFixed(0)} MB)\n` +
-    (band === 'critical'
+  // A drill must be unmistakable at a GLANCE, not on close reading. The first
+  // version only appended a disclaimer under an otherwise-real alarm: red bar,
+  // "[CRITICAL]", a synthetic percentage in the title, and a live imperative
+  // ("Extend the volume now"). Christian read a 9-day-old drill as an emergency
+  // — correctly, because everything that carries urgency said it was one. So a
+  // drill now differs in the three things read first (colour, title, opening
+  // line) and never issues an order; the real wording is QUOTED, not spoken.
+  const drill = Boolean(note);
+  const action =
+    band === 'critical'
       ? 'At 100% SQLite can neither checkpoint nor DELETE — it cannot recover on its own. Extend the volume now.'
-      : 'Headroom shrinking. Check retention + WAL before it reaches critical.') +
-    (note ? `\n\n${note} Synthetic values — no real disk problem. Verifying the alarm path only.` : '');
+      : 'Headroom shrinking. Check retention + WAL before it reaches critical.';
+  const facts =
+    `${gb(u.usedBytes)} used of ${gb(u.totalBytes)} · ${gb(u.availBytes)} free\n` +
+    `WAL: ${(wal / 1_048_576).toFixed(0)} MB (cap ${(config.walCapBytes / 1_048_576).toFixed(0)} MB)`;
+  const title = drill
+    ? `${note} drill — disk alarm path check · NOT a real alert`
+    : `[${band.toUpperCase()}] upmetrics disk ${u.usedPct.toFixed(1)}% full`;
+  const body = drill
+    ? `Nothing is wrong. This is a rehearsal of the ${band} disk alarm; every number below is invented.\n\n` +
+      `A real one would have said:\n` +
+      `> **[${band.toUpperCase()}] upmetrics disk ${u.usedPct.toFixed(1)}% full**\n` +
+      facts
+        .split('\n')
+        .map((l) => `> ${l}`)
+        .join('\n') +
+      `\n> ${action}`
+    : `${facts}\n${action}`;
   try {
     const res = await fetch(webhook, {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify({
-        embeds: [{ title, description: body, color: band === 'critical' ? 0xef4444 : 0xf59e0b }],
+        // grey for a drill — never the alarm palette, so it cannot be mistaken
+        // for a live alert in a glance at a phone notification.
+        embeds: [{ title, description: body, color: drill ? 0x6b7280 : band === 'critical' ? 0xef4444 : 0xf59e0b }],
       }),
     });
     return res.ok || res.status === 204;

@@ -133,6 +133,59 @@ describe('F025.1 — the alarm must survive an unwritable database', () => {
     expect(posted!.body).toContain('99.0%');
   });
 
+  // A drill that LOOKS like an alarm is worse than no drill: Christian read a
+  // 9-day-old one as a live emergency because the colour, the "[CRITICAL]" and
+  // the imperative all said it was real, and only a footer said otherwise.
+  // These assertions fail if anyone makes a drill wear the alarm's clothes again.
+  it('a drill is unmistakable: never the alarm colour, never a live order', async () => {
+    let posted = '';
+    globalThis.fetch = (async (_url: string, init: RequestInit) => {
+      posted = String(init?.body ?? '');
+      return new Response(null, { status: 204 });
+    }) as unknown as typeof fetch;
+
+    await sendDiskAlert(
+      'critical',
+      { totalBytes: 3e9, usedBytes: 2.7e9, availBytes: 0.3e9, usedPct: 90 },
+      200 * 1024 * 1024,
+      'https://discord.test/webhook',
+      '[TEST]',
+    );
+    const embed = JSON.parse(posted).embeds[0];
+
+    expect(embed.color).toBe(0x6b7280); // grey — NOT 0xef4444 red, not amber
+    expect(embed.color).not.toBe(0xef4444);
+    expect(embed.title).toContain('NOT a real alert');
+    expect(embed.title).not.toContain('90.0%'); // no synthetic number stated as fact
+    expect(embed.description).toMatch(/^Nothing is wrong\./); // disclaimer FIRST, not a footer
+    // the real wording may appear only as a quote, never as an instruction
+    for (const line of String(embed.description).split('\n')) {
+      if (line.includes('Extend the volume now')) expect(line.startsWith('>')).toBe(true);
+    }
+  });
+
+  it('a REAL alert still carries the alarm colour and the order', async () => {
+    let posted = '';
+    globalThis.fetch = (async (_url: string, init: RequestInit) => {
+      posted = String(init?.body ?? '');
+      return new Response(null, { status: 204 });
+    }) as unknown as typeof fetch;
+
+    await sendDiskAlert(
+      'critical',
+      { totalBytes: 3e9, usedBytes: 2.7e9, availBytes: 0.3e9, usedPct: 90 },
+      200 * 1024 * 1024,
+      'https://discord.test/webhook',
+    );
+    const embed = JSON.parse(posted).embeds[0];
+
+    expect(embed.color).toBe(0xef4444);
+    expect(embed.title).toContain('[CRITICAL]');
+    expect(embed.title).toContain('90.0%');
+    expect(embed.description).toContain('Extend the volume now.');
+    expect(embed.description).not.toContain('>'); // not quoted — this one is real
+  });
+
   it('reports failure instead of throwing when the webhook is unreachable', async () => {
     globalThis.fetch = (async () => {
       throw new Error('network down');
