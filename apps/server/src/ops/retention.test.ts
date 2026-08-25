@@ -210,3 +210,94 @@ describe('F025.2 per-project event cap', () => {
     expect(countEvents(db, 'x')).toBe(8);
   });
 });
+
+// F025.2 — "deleted 0 because there was nothing" vs "deleted 0 because deleting
+// stopped working". Both are silence; only one fills the disk. The blocked
+// delete below is a REAL silent failure against a real database (a BEFORE
+// DELETE trigger that raises IGNORE drops the row operation without an error),
+// not a stub — the point is to reproduce the exact shape the old code reported
+// as success: it counted the rows it SELECTED, so a delete that removed nothing
+// still logged a confident number.
+function blockDeletes(db: Db, table: 'events' | 'probe_results'): void {
+  db.run(sql.raw(`CREATE TRIGGER block_${table}_delete BEFORE DELETE ON ${table} BEGIN SELECT RAISE(IGNORE); END;`));
+}
+
+describe('F025.2 a prune that removes nothing must not report success', () => {
+  it('reports 0 deleted — not the number it selected — when the delete silently does nothing', () => {
+    const db = freshDb();
+    addProject(db, 'a', { retentionDays: 30 });
+    for (let i = 0; i < 3; i++) addEvent(db, 'a', 60); // all expired
+    blockDeletes(db, 'events');
+
+    const r = runRetention(db, NOW);
+
+    expect(r.eventsDeleted).toBe(0); // the old code reported 3 here
+    expect(countEvents(db, 'a')).toBe(3); // and the rows really are still there
+    expect(r.anomalies.length).toBeGreaterThan(0);
+    expect(r.anomalies[0]).toContain('valgte 3');
+  });
+
+  it('says nothing when the prune genuinely worked — the negative control', () => {
+    const db = freshDb();
+    addProject(db, 'a', { retentionDays: 30 });
+    for (let i = 0; i < 3; i++) addEvent(db, 'a', 60);
+
+    const r = runRetention(db, NOW);
+
+    expect(r.eventsDeleted).toBe(3);
+    expect(r.anomalies).toEqual([]); // proves an empty list is a measurement, not the default
+  });
+
+  it('an empty database is silent — "nothing to do" never raises an anomaly', () => {
+    const db = freshDb();
+    addProject(db, 'a');
+
+    const r = runRetention(db, NOW);
+
+    expect(r.eventsDeleted).toBe(0);
+    expect(r.anomalies).toEqual([]);
+  });
+
+  it('stops instead of re-selecting rows the delete refuses to remove', () => {
+    // Without this guard the batch loop re-selects the same rows forever. On a
+    // synchronous driver that is not a slow job, it is a frozen server — so a
+    // regression here shows up as this test timing out, which is the intended
+    // signal.
+    const db = freshDb();
+    addProject(db, 'a', { retentionDays: 1 });
+    for (let i = 0; i < config.retentionBatchSize + 100; i++) addEvent(db, 'a', 5);
+    blockDeletes(db, 'events');
+
+    const r = runRetention(db, NOW);
+
+    expect(r.eventsDeleted).toBe(0);
+    expect(r.anomalies.length).toBeGreaterThan(0);
+  });
+
+  it('the per-project cap reports the same way when its delete is blocked', () => {
+    const db = freshDb();
+    addProject(db, 'flooder', { retentionDays: 30 });
+    for (let i = 0; i < 25; i++) addEvent(db, 'flooder', 1); // inside the window
+    blockDeletes(db, 'events');
+
+    const r = runRetention(db, NOW, { maxEventsPerProject: 10 });
+
+    expect(r.eventsCapped).toBe(0);
+    expect(countEvents(db, 'flooder')).toBe(25);
+    expect(r.anomalies.some((a) => a.includes('loft'))).toBe(true);
+  });
+
+  it('probe compaction does not drop the samples when the aggregate row fails to update', () => {
+    const db = freshDb();
+    addProject(db, 'a');
+    addProbe(db, 'p1', 'a');
+    for (let i = 0; i < 4; i++) addProbeResult(db, 'p1', 10, i * 5, true, 100);
+    blockDeletes(db, 'probe_results');
+
+    const r = runRetention(db, NOW);
+
+    expect(r.probeResultsCompacted).toBe(0);
+    expect(db.select().from(schema.probeResults).all().length).toBe(4); // nothing lost
+    expect(r.anomalies.some((a) => a.includes('probe_results'))).toBe(true);
+  });
+});

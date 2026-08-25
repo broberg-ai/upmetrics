@@ -113,6 +113,41 @@ Skrive-stien til upmetrics ER load-bearing: fejler den, er hele flåden blind.
 - **RØD test i CI:** fejler hvis WAL-ventilen ikke fyrer over sit loft, eller hvis disk-guarden ikke fyrer over tærsklen. Skal blokere deploy.
 - **Runtime-probe:** disk-guarden er selv probén — men skal kunne alarmere UDEN at skrive til den database den overvåger, ellers fejler den præcis når den behøves.
 
+## Oprydningen vidste ikke om den virkede (tilføjet 2026-08-25)
+
+Målt 2026-08-25: `.changes` blev læst **nul steder** i hele serveren. Værre end
+det — de tal retention loggede kom fra den SELECT der udvalgte rækkerne, ikke
+fra den DELETE der skulle fjerne dem:
+
+| Sted | Talte | Skulle have talt |
+|---|---|---|
+| `batchedDelete` | `ids.length` (udvælgelsen) | slettede rækker |
+| `capProjectEvents` | `ids.length` | slettede rækker |
+| `compactProbeResults` | `deleteIds.length` | slettede rækker |
+
+Konsekvensen er ikke et upræcist tal. En sletning der holdt op med at virke
+ville logge et **selvsikkert** "1000 slettet" mens disken voksede — og
+`batchedDelete` ville genudvælge de samme rækker i en uendelig løkke. På en
+synkron driver er det ikke et langsomt job, det er en frossen server.
+
+Samme fejlform fandt buddy hos sig selv samme dag (deres gc talte også fra
+udvælgelsen). Formen på hjælperen er deres: svaret er `number | null`, **aldrig
+et gæt på 0 eller 1** — et gættet 0 ville få oprydningen til at melde "intet at
+gøre" i al evighed, hvilket er præcis den fejl kontrollen findes for.
+
+Bevist mod en ÆGTE database, ikke en attrap: en `BEFORE DELETE`-trigger med
+`RAISE(IGNORE)` giver en tavs sletning uden fejl — samme form som den ægte
+svigt. Negativ kontrol begge veje: en sund kørsel må ikke rejse en anmærkning,
+og en tom database må heller ikke. `.run()` er TYPET `void` af driveren men
+returnerer et RunResult, så korrektheden hviler på udokumenteret runtime-adfærd
+— derfor har `db/changes.test.ts` sin egen prøve, så en drizzle-opgradering der
+ændrer formen bliver RØD i stedet for at returnere `null` for evigt.
+
+En ubekræftet sletning logges som fejl **også på en ellers tavs kørsel** (den
+tavshed ER symptomet) og sendes til vores eget fejl-board via `captureSelf` —
+en log-linje på én maskine er ikke noget nogen læser før disken er fuld. Det tog
+tre døgn sidste gang.
+
 ## Kilde
 
 Første anmeldelse + rå måling: buddy-sessionen 2026-08-02 (intercom #18429) efter Christian rapporterede vedvarende alarmer. Root cause målt, korrigeret og log-verificeret af upmetrics-sessionen samme dag (intercom #18430).
