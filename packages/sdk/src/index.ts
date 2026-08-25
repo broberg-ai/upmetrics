@@ -142,12 +142,36 @@ function uuid(): string {
   return crypto.randomUUID().replace(/-/g, '');
 }
 
+// Stack text differs by ENGINE, and the original V8-only pattern silently
+// dropped every frame Safari and Firefox produce: they write `fn@file:l:c`
+// with no `at`, so an error from an iPhone arrived carrying no origin at all
+// — and the server then groups ALL frameless events of a type into one issue
+// (ingest/grouping.ts keys on `type|topFrame`, so no frame ⇒ a shared key).
+// Measured 2026-08-25 before this fix: Firefox 0/2 frames, Safari 0/2,
+// Safari `global code` 0/1, anonymous V8 0/1. Chrome/Node were unaffected.
+const V8_FRAME = /^\s*at\s+(?:(.+?)\s+\()?(.+?):(\d+):(\d+)\)?$/;
+// SpiderMonkey (Firefox) + JavaScriptCore (Safari). The function part may be
+// empty (`@file:l:c`) or carry spaces (`global code@file:l:c`).
+const AT_FRAME = /^\s*(.*?)@(.+?):(\d+):(\d+)$/;
+
 function parseStack(stack: string | undefined): Array<Record<string, unknown>> {
   if (!stack) return [];
   const frames: Array<Record<string, unknown>> = [];
-  for (const line of stack.split('\n').slice(1)) {
-    const m = line.match(/at (.+?) \(?(.+?):(\d+):(\d+)\)?$/);
-    if (m) frames.push({ function: m[1], filename: m[2], lineno: Number(m[3]), colno: Number(m[4]) });
+  // Every line is offered to both patterns rather than skipping line 0. V8 puts
+  // "Error: msg" first, but a Firefox stack starts DIRECTLY with a frame, so the
+  // old `.slice(1)` discarded Firefox's crashing frame even once the pattern
+  // matched it. A header line matches neither pattern and is skipped on its own.
+  for (const line of stack.split('\n')) {
+    const m = line.match(V8_FRAME) ?? line.match(AT_FRAME);
+    if (!m) continue;
+    frames.push({
+      // An unnamed frame is still a location worth keeping; only the name is
+      // unknown, and '' would read as "no function" in the dashboard.
+      function: m[1] || '<anonymous>',
+      filename: m[2],
+      lineno: Number(m[3]),
+      colno: Number(m[4]),
+    });
   }
   // Sentry orders frames oldest-first (crashing frame last).
   return frames.reverse();
