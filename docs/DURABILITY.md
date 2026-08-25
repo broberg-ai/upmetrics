@@ -62,3 +62,39 @@ deploys during the flap (see memory `upmetrics-deploy-during-flap`). Recovery:
 wait for fly to restore the host, then `fly machine start`. The external
 watchdog (F008.2) alerts from off-fly; storm-control (F008.3) collapses the
 fleet noise into one alert.
+
+## Restore-drill KØRT 2026-08-25 (indtil da: dokumenteret, aldrig gået)
+
+Indtil denne dato var Litestream-restore beskrevet i denne fil og aldrig
+afprøvet. Værre: da vi FAKTISK havde et nedbrud (arn-host væk), reddede vi os
+med et Fly volume-snapshot — path B, ikke path A. Litestream-vejen var altså
+konfigureret, overvåget, og ubevist. coverletter spurgte direkte, og det er
+spørgsmålet der bør stilles til enhver backup.
+
+Kørt på produktionsmaskinen, replika → `/tmp/restored.db` (bevidst IKKE `/data`:
+kopien må ikke røre den base den kopierer, og `/data` har en diskvagt der ville
+have alarmeret på 777 MB ekstra):
+
+```
+litestream restore -o /tmp/restored.db -config /tmp/litestream.yml /data/upmetrics.db
+```
+
+| | |
+|---|---|
+| 777 MB restoret på | **96 sekunder** |
+| `PRAGMA integrity_check` | **ok** |
+| projects / events | 19 / 19 · 22.989 / 22.989 |
+| issues / agent_runs | 99 / 99 · 33.017 / 33.017 |
+| probes / probe_results | 13 / 13 · 46.803 / 46.803 |
+| deploy_events / incidents | 413 / 413 · 1.168 / 1.168 |
+| nyeste event | identisk tidsstempel — **datatab 0 sekunder** |
+
+Nul afvigelse på otte tabeller. Kopien slettet efter kontrollen.
+
+**Begge veje beholdes.** Litestream giver næsten-nul datatab, men forudsætter at
+replikaen kan nås. Volume-snapshottet reddede os da hosten var væk. De to fejler
+ikke sammen, og det er hele grunden til at have dem begge.
+
+Gentag drillen efter enhver ændring i `start.sh`, i Litestream-versionen eller i
+WAL-opsætningen (`wal_autocheckpoint`, ventilen). En backup der ikke er restoret
+er en formodning.
