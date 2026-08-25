@@ -40,7 +40,10 @@ function withStack(stack: string | undefined): Error {
   return e;
 }
 
-// One REAL example per engine. `expected` is the frame count that must survive.
+// One HAND-WRITTEN example per engine — written from what each engine should
+// produce, so passing proves the parser matches that expectation, not the
+// format. The CAPTURED stacks at the bottom of this file are the real thing.
+// `expected` is the frame count that must survive.
 const CASES: Array<{ name: string; stack: string; expected: number; top: Partial<Frame> }> = [
   {
     name: 'V8/Node — named frames',
@@ -117,5 +120,132 @@ describe('F027.1 — parseStack across engines', () => {
   it('a stack that is only a header yields no frames', () => {
     captureException(withStack('TimeoutError: signal timed out'));
     expect(rec.frames().length).toBe(0);
+  });
+});
+
+// ── Captured from real browsers ──────────────────────────────────────────────
+// The cases above are hand-written: they prove the parser matches MY idea of
+// what Safari and Firefox emit. These were captured by the coverletter session
+// via Lens from an actual WebKit and an actual Firefox against a live page
+// (raw `e.stack`, verbatim, call chain levelOne → levelTwo → `null.boom`).
+// They carry five things a hand-written sample does not think to contain:
+//
+//   1. `global code@` — a function name with a SPACE in it
+//   2. `appendChild@[native code]` — a named frame with NO line/col at all
+//   3. a Firefox filename containing spaces AND `>`:
+//      `…/auth/signin line 3 > injectedScript:1:22`
+//   4. `anonymous/</<@` — a name containing `/` and `<` (nested closures)
+//   5. a frame that is literally `@` and nothing else
+//
+// Any of 1, 3 or 4 would silently corrupt a parser that splits on whitespace,
+// on `/`, or takes "up to the first space" as the filename.
+const WEBKIT_REAL = `levelTwo@https://coverletter-generator.fly.dev/auth/signin:1:26
+levelOne@https://coverletter-generator.fly.dev/auth/signin:1:63
+global code@https://coverletter-generator.fly.dev/auth/signin:1:82
+appendChild@[native code]
+@
+@
+anonymous@
+evalAssertBody@
+evaluate@
+@`;
+
+const FIREFOX_REAL = `levelTwo@https://coverletter-generator.fly.dev/auth/signin line 3 > injectedScript:1:22
+levelOne@https://coverletter-generator.fly.dev/auth/signin line 3 > injectedScript:1:55
+@https://coverletter-generator.fly.dev/auth/signin line 3 > injectedScript:1:74
+anonymous/</<@debugger eval code line 303 > eval line 4 > Function:3:250
+anonymous/<@debugger eval code line 303 > eval line 4 > Function:3:376
+anonymous@debugger eval code line 303 > eval line 4 > Function:3:380
+evalAssertBody@debugger eval code:14:10
+evaluate@debugger eval code:305:16
+@debugger eval code:1:44`;
+
+// A WHOLE WebKit stack in which not one frame carries a file. Not an excerpt,
+// and not an edge case — this is what an inline `null.x` in an eval context
+// produces, and it is half of an ordinary Safari stack. It is the input that
+// still reaches the server with frames: [] after F027.1, which is why F027.2
+// (frameless events must not share one fingerprint) exists.
+const WEBKIT_NO_FILE = `@
+@
+anonymous@
+evalAssertBody@
+evaluate@
+@`;
+
+describe('F027.1 — stacks captured from real browsers, not written by hand', () => {
+  let h: ReturnType<typeof setup>;
+  beforeEach(() => { h = setup(); });
+
+  it('WebKit: keeps the three located frames and names the crashing one exactly', () => {
+    captureException(withStack(WEBKIT_REAL));
+    const f = h.frames();
+    expect(f.length).toBe(3);
+    // Sentry order: crashing frame LAST.
+    expect(f[f.length - 1]).toEqual({
+      function: 'levelTwo',
+      filename: 'https://coverletter-generator.fly.dev/auth/signin',
+      lineno: 1,
+      colno: 26,
+    });
+    // The space in `global code` must survive intact — a whitespace split loses it.
+    expect(f[0]).toEqual({
+      function: 'global code',
+      filename: 'https://coverletter-generator.fly.dev/auth/signin',
+      lineno: 1,
+      colno: 82,
+    });
+  });
+
+  it('WebKit: a frame with no line/col, and a frame that is only `@`, are skipped without throwing', () => {
+    captureException(withStack(WEBKIT_REAL));
+    // 7 of the 10 lines carry no location; none of them may become a frame with
+    // NaN or undefined fields, and none may abort the parse of the other three.
+    const f = h.frames();
+    expect(f.length).toBe(3);
+    for (const fr of f) {
+      expect(Number.isFinite(fr.lineno)).toBe(true);
+      expect(Number.isFinite(fr.colno)).toBe(true);
+      expect(fr.filename).toBeTruthy();
+    }
+  });
+
+  it('Firefox: parses all nine frames, including filenames containing spaces and `>`', () => {
+    captureException(withStack(FIREFOX_REAL));
+    const f = h.frames();
+    expect(f.length).toBe(9);
+    expect(f[f.length - 1]).toEqual({
+      function: 'levelTwo',
+      filename: 'https://coverletter-generator.fly.dev/auth/signin line 3 > injectedScript',
+      lineno: 1,
+      colno: 22,
+    });
+  });
+
+  it('Firefox: a name containing `/` and `<` is not split in half', () => {
+    captureException(withStack(FIREFOX_REAL));
+    const f = h.frames();
+    const nested = f.find((x) => x.function === 'anonymous/</<');
+    expect(nested).toBeTruthy();
+    expect(nested!.filename).toBe('debugger eval code line 303 > eval line 4 > Function');
+    expect(nested!.lineno).toBe(3);
+    expect(nested!.colno).toBe(250);
+  });
+
+  it('Firefox: an unnamed frame keeps its location and is labelled, not blanked', () => {
+    captureException(withStack(FIREFOX_REAL));
+    const f = h.frames();
+    const unnamed = f.find((x) => x.colno === 74)!;
+    expect(unnamed.function).toBe('<anonymous>');
+    expect(unnamed.filename).toBe('https://coverletter-generator.fly.dev/auth/signin line 3 > injectedScript');
+  });
+
+  it('a whole WebKit stack with no file anywhere yields 0 frames — the F027.2 input', () => {
+    // Documents the LIMIT, so nobody reads F027.1 as "Safari is solved". The
+    // parser is right to produce nothing here (there is nothing to produce);
+    // what is still wrong is downstream, where every frameless event of a type
+    // collapses into ONE issue. This test must keep passing at 0 and be
+    // referenced when F027.2 changes what the server does with that.
+    captureException(withStack(WEBKIT_NO_FILE));
+    expect(h.frames().length).toBe(0);
   });
 });
