@@ -18,7 +18,7 @@
   "dependencies": {
     "@broberg/config": "0.2.0",
     "@broberg/lens": "0.1.2",
-    "@broberg/mail": "0.1.0",
+    "@broberg/mail": "0.7.1",
     "@upmetrics/sdk": "^0.4.1",
     "better-auth": "^1.6.11",
     "drizzle-orm": "^0.45.2",

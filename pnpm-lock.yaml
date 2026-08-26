@@ -27,8 +27,8 @@ importers:
         specifier: 0.1.2
         version: 0.1.2(hono@4.12.23)
       '@broberg/mail':
-        specifier: 0.1.0
-        version: 0.1.0
+        specifier: 0.7.1
+        version: 0.7.1
       '@upmetrics/sdk':
         specifier: ^0.4.1
         version: 0.4.1
@@ -304,8 +304,8 @@ packages:
       hono:
         optional: true
 
-  '@broberg/mail@0.1.0':
-    resolution: {integrity: sha512-H8Trh+EN3tqCFdZrfRQsWQJFjVeg8S7se1hJbIEjxiez6zlN9PMdjsD9QuOiUNsShyWdw9MGzihqMdQfx5IIZg==}
+  '@broberg/mail@0.7.1':
+    resolution: {integrity: sha512-UjOFan+y2vBbIbH4iSYaHu74ngkiatu7QtZ2THoTcokF0Pt3PtIsKSP7RePL9PMx6efXojHEsz/vsDkPEozu9Q==}
 
   '@drizzle-team/brocli@0.10.2':
     resolution: {integrity: sha512-z33Il7l5dKjUgGULTqBsQBQwckHh5AbIuxhdsIxDDiZAzBOrZO6q9ogcWC65kU382AfynTfgNumVcNIjuIua6w==}
@@ -2176,7 +2176,7 @@ snapshots:
     optionalDependencies:
       hono: 4.12.23
 
-  '@broberg/mail@0.1.0': {}
+  '@broberg/mail@0.7.1': {}
 
   '@drizzle-team/brocli@0.10.2': {}
 
