@@ -53,45 +53,50 @@ describe('mail gate — live must be explicit', () => {
     expect(s.calls).toBe(0);
   });
 
-  it('the REAL src/mail.ts resolves to live under production env', async () => {
-    // Not a mirror of the wiring — the wiring itself, imported in a subprocess
-    // with a production environment. A mirror test measures its own input: it
-    // would stay green while the actual module lost its `live` argument.
+  it('the REAL src/mail.ts resolves to live on a DEPLOYED instance', async () => {
+    // Not a mirror of the wiring — the wiring itself, in a subprocess. A mirror
+    // test measures its own input: it would stay green while the module lost
+    // its `live` argument. FLY_APP_NAME is what makes it "deployed".
     const proc = Bun.spawnSync({
       cmd: ['bun', '-e', "const m = await import('./src/mail.ts'); console.log(m.mailer.mode);"],
       cwd: import.meta.dir + '/..',
-      env: { ...process.env, NODE_ENV: 'production', RESEND_API_KEY: 'test-key', AUTH_SECRET: 'x'.repeat(32) },
+      env: { ...process.env, FLY_APP_NAME: 'upmetrics', NODE_ENV: 'production', AUTH_SECRET: 'x'.repeat(32), RESEND_API_KEY: 'test-key' },
     });
     const out = new TextDecoder().decode(proc.stdout).trim();
-    const err = new TextDecoder().decode(proc.stderr).trim();
-    expect(out, `stdout=${out} stderr=${err}`).toBe('live');
+    expect(out, `stderr=${new TextDecoder().decode(proc.stderr).trim()}`).toBe('live');
   });
 
-  it('production REFUSES to boot when mail could not deliver', async () => {
-    // The negative control, rewritten TWICE, and both rewrites were the same
-    // class of mistake as the bug it guards:
-    //   1st: MAIL_DISABLED — read by createMailerFromEnv(), which we do not
-    //        use. The switch never reached our code; the test went green on a
-    //        lever connected to nothing.
-    //   2nd: deleting RESEND_API_KEY from the child env — bun auto-loads
-    //        .env.local, so the key came back from the file and the subprocess
-    //        booted with a real one.
-    // An EMPTY value set explicitly is the lever that works: it wins over the
-    // file, and config.ts refuses to start.
-    //
-    // It trips productionGuard in config.ts, not the mode check in mail.ts.
-    // The mode check is unreachable from any environment today (in production
-    // `live` is true whenever a key exists, and without a key config throws
-    // first) — it is a tripwire for a future @broberg/mail whose semantics move
-    // again. Saying so is better than a test that pretends to exercise it.
+  it('does NOT decide "deployed" from NODE_ENV — the value we set ourselves', async () => {
+    // The guard against a circular gate. NODE_ENV is written in BOTH fly.toml
+    // and our Dockerfile, so it is the value that drifts; if the gate read it,
+    // a drift would close delivery AND silence the check at the same time.
+    // Production-looking env, but no platform marker ⇒ must NOT be live.
+    const env = { ...process.env, NODE_ENV: 'production', AUTH_SECRET: 'x'.repeat(32), RESEND_API_KEY: 'test-key' };
+    delete (env as Record<string, string | undefined>).FLY_APP_NAME;
     const proc = Bun.spawnSync({
-      cmd: ['bun', '-e', "await import('./src/mail.ts'); console.log('BOOTED');"],
+      cmd: ['bun', '-e', "const m = await import('./src/mail.ts'); console.log(m.mailer.mode);"],
       cwd: import.meta.dir + '/..',
-      env: { ...process.env, NODE_ENV: 'production', AUTH_SECRET: 'x'.repeat(32), RESEND_API_KEY: '' },
+      env,
     });
-    // Never print the child's env or config: an earlier version of this file
-    // printed config.resendApiKey while diagnosing, and put a live key in a log.
-    expect(new TextDecoder().decode(proc.stdout).trim()).not.toContain('BOOTED');
-    expect(proc.exitCode).not.toBe(0);
+    expect(new TextDecoder().decode(proc.stdout).trim()).toBe('allowlist-only');
+  });
+
+  it('a deployed instance that cannot deliver COMPLAINS instead of booting quietly', async () => {
+    // The negative control, and it took three attempts — each failure the same
+    // class as the bug it guards:
+    //   1. MAIL_DISABLED: read by createMailerFromEnv(), which we do not use.
+    //      Green on a lever wired to nothing.
+    //   2. deleting RESEND_API_KEY: bun auto-loads .env.local, so the key came
+    //      back from the file and the child booted with a real one.
+    //   3. this one: an EMPTY key set explicitly wins over the file.
+    // Never print the child's env or config — an earlier version of this file
+    // printed config.resendApiKey while diagnosing and put a live key in a log.
+    const proc = Bun.spawnSync({
+      cmd: ['bun', '-e', "const m = await import('./src/mail.ts'); m.assertMailGateSane(); console.log('mode=' + m.mailer.mode);"],
+      cwd: import.meta.dir + '/..',
+      env: { ...process.env, FLY_APP_NAME: 'upmetrics', NODE_ENV: 'development', AUTH_SECRET: 'x'.repeat(32), RESEND_API_KEY: '' },
+    });
+    expect(new TextDecoder().decode(proc.stdout).trim()).toBe('mode=no-key');
+    expect(new TextDecoder().decode(proc.stderr)).toContain('mail gate closed on a deployed instance');
   });
 });

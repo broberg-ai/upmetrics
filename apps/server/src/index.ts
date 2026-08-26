@@ -7,6 +7,7 @@ import { startDiskGuardWorker } from './ops/diskguard';
 import { startFxWorker } from './fx/rate';
 import { startLagGauge } from './ops/lag-gauge';
 import { initDogfood } from './dogfood';
+import { assertMailGateSane } from './mail';
 
 const app = createApp();
 
@@ -27,7 +28,7 @@ startDiskGuardWorker();
 startFxWorker();
 
 // F009.1: dogfood — self-monitor via @upmetrics/sdk (no-op if SDK/DSN absent).
-void initDogfood();
+void initDogfood().then(assertMailGateSane);
 
 console.log(`@upmetrics/server listening on :${config.port} (${config.nodeEnv})`);
 
