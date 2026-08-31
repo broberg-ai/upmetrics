@@ -117,6 +117,12 @@ export function evaluateDeploy(db: Db, d: Deploy, now: Date = new Date()): Regre
     .where(eq(schema.deployEvents.id, d.id))
     .run();
 
+  if (res.verdict !== 'regressed') {
+    // A clean verdict is the only thing that may retire an older alarm for this
+    // site. See resolveSupersededRegressions for why "newer" alone is not it.
+    resolveSupersededRegressions(db, d, now);
+  }
+
   if (res.verdict === 'regressed') {
     const open = db
       .select()
@@ -143,6 +149,50 @@ export function evaluateDeploy(db: Db, d: Deploy, now: Date = new Date()): Regre
 }
 
 // Worker pass — evaluate every pending deploy. Returns the count evaluated.
+// F026.1 — close a deploy_regression once a LATER deploy of the same site has
+// earned its own healthy verdict.
+//
+// Why this is not "a newer deploy exists": a newer deploy can be just as sick,
+// and closing on its mere arrival would silence the alarm exactly when it is
+// still true. The condition is a newer deploy that has been MEASURED and came
+// back clean — which is why this is only ever called from the healthy branch of
+// evaluateDeploy, after the verdict is stamped.
+//
+// Scoped to the SITE, not the project. fysiodk ships web, ios and android under
+// one project; a healthy web deploy says nothing about the android build, and
+// resolving across them would close an alarm nobody has answered.
+//
+// The cost of not having this, measured: "webhouse.app deploy regressed
+// (f6063b7)" opened 26 Aug and fired every hour for five days about a release
+// replaced within the hour — 124 alerts, all about the same dead deploy. An
+// alarm that outlives its own subject teaches the owner to scroll past alarms.
+export function resolveSupersededRegressions(db: Db, healthy: Deploy, now: Date = new Date()): number {
+  const open = db
+    .select()
+    .from(schema.incidents)
+    .where(and(eq(schema.incidents.projectId, healthy.projectId), eq(schema.incidents.kind, 'deploy_regression'), eq(schema.incidents.status, 'open')))
+    .all();
+
+  let closed = 0;
+  for (const inc of open) {
+    // triggerRef points at the deploy the incident was opened for. No ref, or a
+    // deploy we can no longer read, means we cannot prove this incident is
+    // superseded — leave it open. An alarm we cannot reason about stays.
+    if (!inc.triggerRef) continue;
+    const origin = db.select().from(schema.deployEvents).where(eq(schema.deployEvents.id, inc.triggerRef)).get();
+    if (!origin) continue;
+    if (origin.site !== healthy.site) continue;
+    // Strictly older. Equal timestamps would let a deploy resolve its own
+    // incident, and "not newer" is not the same as "superseded".
+    if (origin.updatedAt.getTime() >= healthy.updatedAt.getTime()) continue;
+
+    db.update(schema.incidents).set({ status: 'resolved', resolvedAt: now }).where(eq(schema.incidents.id, inc.id)).run();
+    closed++;
+    console.log(`[regression] resolved ${inc.id} — ${healthy.site} deploy ${(healthy.sha ?? '').slice(0, 7)} measured healthy after it`);
+  }
+  return closed;
+}
+
 export function evaluateDeployRegressions(db: Db, now: Date = new Date()): number {
   const pending = pendingEvaluations(db, now);
   for (const d of pending) evaluateDeploy(db, d, now);

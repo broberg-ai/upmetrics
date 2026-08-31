@@ -108,3 +108,102 @@ describe('POST /api/issues/resolve-all (clear slate)', () => {
 });
 
 import { eq } from 'drizzle-orm';
+
+// ── F026 — the other half of the self-service contract ──────────────────────
+describe('F026 incidents + issue detail', () => {
+  const now = new Date();
+  beforeAll(() => {
+    const db = getDb();
+    db.insert(schema.events)
+      .values({ id: 'ev_f026_1', projectId: 'isr_trail', kind: 'error', receivedAt: now, occurredAt: now, issueId: 'isr1', release: 'r1', environment: 'production', tags: { runtime: 'server' },
+        payload: { exception: { values: [{ type: 'TypeError', value: 'x is not a function', stacktrace: { frames: [{ function: 'f', filename: '/a.ts', lineno: 3, colno: 1 }] } }] } } })
+      .run();
+    // Frameless on purpose: an event that arrived with no origin is a real
+    // answer, and the route must show the emptiness rather than hide it.
+    db.insert(schema.events)
+      .values({ id: 'ev_f026_2', projectId: 'isr_trail', kind: 'error', receivedAt: new Date(now.getTime() - 1000), occurredAt: now, issueId: 'isr1', release: 'r1',
+        payload: { exception: { values: [{ type: 'TimeoutError', value: 'timed out', stacktrace: { frames: [] } }] } } })
+      .run();
+    const inc = (id: string, projectId: string, status: string) =>
+      db.insert(schema.incidents).values({ id, projectId, kind: 'deploy_regression', status, severity: 'high', title: `regressed ${id}`, openedAt: now, triggerRef: 'dep_x' }).run();
+    inc('incA', 'isr_trail', 'open');
+    inc('incB', 'isr_trail', 'resolved');
+    inc('incC', 'isr_other', 'open'); // never visible via the trail key
+  });
+
+  it('status=all returns every issue — it used to return an empty list', async () => {
+    // The bug cms found: "all" was compared against each row's status, matched
+    // nothing, and answered [] — which reads as "no errors" to the caller.
+    // Asserted against the DATABASE, not against another route's answer: an
+    // earlier test in this file resolves issues, so any count derived from the
+    // default view depends on test order. The property is "all means all".
+    const rows = getDb().select().from(schema.issues).where(eq(schema.issues.projectId, 'isr_trail')).all();
+    expect(rows.length).toBeGreaterThan(1);
+    const all = (await (await req('/api/issues?status=all', KEY)).json()) as { issues: unknown[] };
+    expect(all.issues.length).toBe(rows.length);
+    // And it is genuinely wider than the default, which is the half that broke.
+    const dflt = (await (await req('/api/issues', KEY)).json()) as { issues: unknown[] };
+    expect(all.issues.length).toBeGreaterThan(dflt.issues.length);
+  });
+
+  it('GET /api/issues/:id gives the stack, release and tags behind the issue', async () => {
+    const r = await req('/api/issues/isr1', KEY);
+    expect(r.status).toBe(200);
+    const b = (await r.json()) as { id: string; latest_event: { type: string; release: string; tags: unknown; frames: unknown[] } };
+    expect(b.id).toBe('isr1');
+    expect(b.latest_event.type).toBe('TypeError');
+    expect(b.latest_event.release).toBe('r1');
+    expect(b.latest_event.tags).toEqual({ runtime: 'server' });
+    expect(b.latest_event.frames.length).toBe(1);
+  });
+
+  it('GET /api/issues/:id/events lists them newest first, and keeps an empty stack visible', async () => {
+    const b = (await (await req('/api/issues/isr1/events', KEY)).json()) as { count: number; events: { id: string; frames: unknown[] }[] };
+    expect(b.count).toBe(2);
+    expect(b.events[0]!.id).toBe('ev_f026_1'); // newest first
+    expect(b.events[1]!.frames).toEqual([]); // emptiness shown, not smoothed to null
+  });
+
+  it('another project’s issue is not readable', async () => {
+    expect((await req('/api/issues/isr3', KEY)).status).toBe(404);
+    expect((await req('/api/issues/isr3/events', KEY)).status).toBe(404);
+  });
+
+  it('lists only YOUR open incidents by default', async () => {
+    const b = (await (await req('/api/incidents', KEY)).json()) as { incidents: { id: string }[] };
+    const ids = b.incidents.map((i) => i.id);
+    expect(ids).toContain('incA');
+    expect(ids).not.toContain('incB'); // resolved
+    expect(ids).not.toContain('incC'); // another project
+  });
+
+  it('status=all on incidents includes the resolved ones', async () => {
+    const b = (await (await req('/api/incidents?status=all', KEY)).json()) as { incidents: { id: string }[] };
+    const ids = b.incidents.map((i) => i.id);
+    expect(ids).toContain('incA');
+    expect(ids).toContain('incB');
+    expect(ids).not.toContain('incC');
+  });
+
+  it('resolves one of your incidents, and the DATABASE agrees', async () => {
+    const r = await req('/api/incidents/incA/resolve', KEY, { method: 'POST', body: '{}' });
+    expect(r.status).toBe(200);
+    // Read back from the row, never from the handler's own reply.
+    const row = getDb().select().from(schema.incidents).where(eq(schema.incidents.id, 'incA')).get()!;
+    expect(row.status).toBe('resolved');
+    expect(row.resolvedAt).toBeTruthy();
+  });
+
+  it('cannot resolve another project’s incident', async () => {
+    expect((await req('/api/incidents/incC/resolve', KEY, { method: 'POST', body: '{}' })).status).toBe(404);
+    const row = getDb().select().from(schema.incidents).where(eq(schema.incidents.id, 'incC')).get()!;
+    expect(row.status).toBe('open'); // untouched
+  });
+
+  it('no key is 401 on every new route', async () => {
+    expect((await req('/api/issues/isr1', null)).status).toBe(401);
+    expect((await req('/api/issues/isr1/events', null)).status).toBe(401);
+    expect((await req('/api/incidents', null)).status).toBe(401);
+    expect((await req('/api/incidents/incA/resolve', null, { method: 'POST', body: '{}' })).status).toBe(401);
+  });
+});
