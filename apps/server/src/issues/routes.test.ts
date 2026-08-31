@@ -207,3 +207,32 @@ describe('F026 incidents + issue detail', () => {
     expect((await req('/api/incidents/incA/resolve', null, { method: 'POST', body: '{}' })).status).toBe(401);
   });
 });
+
+describe('F026 — an unknown status filter is an error, not an empty list', () => {
+  // super, 2026-08-31: "hvad gør ?status=all nu hvis status-værdien er ukendt?
+  // Svarer den [] igen, står den samme fælde bare et skridt til siden."
+  // They were right: fixing 'all' alone left ?status=vrøvl answering [], and in
+  // an error-tracking API an empty array reads as "nothing is wrong".
+  it('issues: 400 with the valid values, never []', async () => {
+    const r = await req('/api/issues?status=vroevl', KEY);
+    expect(r.status).toBe(400);
+    const b = (await r.json()) as { error: string; valid: string[] };
+    expect(b.error).toBe('unknown_status');
+    expect(b.valid).toContain('all');
+    expect(b.valid).toContain('unresolved');
+  });
+
+  it('incidents: same', async () => {
+    const r = await req('/api/incidents?status=vroevl', KEY);
+    expect(r.status).toBe(400);
+    expect(((await r.json()) as { error: string }).error).toBe('unknown_status');
+  });
+
+  it('the KNOWN values still work — the guard did not close the door', async () => {
+    expect((await req('/api/issues?status=all', KEY)).status).toBe(200);
+    expect((await req('/api/issues?status=resolved', KEY)).status).toBe(200);
+    expect((await req('/api/issues', KEY)).status).toBe(200);
+    expect((await req('/api/incidents?status=all', KEY)).status).toBe(200);
+    expect((await req('/api/incidents?status=open', KEY)).status).toBe(200);
+  });
+});

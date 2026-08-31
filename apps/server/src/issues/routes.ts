@@ -60,6 +60,15 @@ export function registerIssueRoutes(app: Hono): void {
     // possible answer: an empty list that reads as "no errors". Reported by cms
     // 2026-08-31, who noticed only because the other two filters disagreed with it.
     const statusFilter = c.req.query('status'); // exact status, 'all', or absent = unresolved only
+    // An UNKNOWN status is an error, not an empty result. Fixing 'all' alone
+    // would have moved the same trap one step sideways: ?status=vrøvl would
+    // still answer [], and in an error-tracking API an empty array reads as
+    // "nothing is wrong". Named by super 2026-08-31, who asked what the fix did
+    // with a value it did not know rather than taking the fix on trust.
+    // Three states, not two: known filter · unknown filter · no filter.
+    if (statusFilter && statusFilter !== 'all' && !STATUSES.has(statusFilter)) {
+      return c.json({ error: 'unknown_status', got: statusFilter, valid: [...STATUSES, 'all'] }, 400);
+    }
     const rows = db
       .select()
       .from(schema.issues)
@@ -206,6 +215,10 @@ export function registerIssueRoutes(app: Hono): void {
     const project = projectFromKey(c);
     if (!project) return c.json({ error: 'invalid_api_key' }, 401);
     const statusFilter = c.req.query('status'); // exact status, 'all', or absent = open only
+    // Same three states as /api/issues — an unknown status must not answer [].
+    if (statusFilter && statusFilter !== 'all' && !INCIDENT_STATUSES.has(statusFilter)) {
+      return c.json({ error: 'unknown_status', got: statusFilter, valid: [...INCIDENT_STATUSES, 'all'] }, 400);
+    }
     const rows = getDb()
       .select()
       .from(schema.incidents)
