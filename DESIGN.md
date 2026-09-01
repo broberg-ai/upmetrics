@@ -35,3 +35,46 @@ conversation with the owner.
 ## Overview
 
 _Replace this with what the product actually looks like, in a sentence or two._
+
+## Anti-patterns
+
+*Applies to every change — these are not per-surface preferences. Each one below has been
+shipped, reported by the owner, and fixed; they are here because they came back.*
+
+### The wiggle — the page must NEVER scroll sideways at phone width
+
+Christian's name for it, and he has reported it four times. **Wide content — a table, a
+code block, a diagram, a revealed secret — scrolls inside its own `overflow-x: auto`
+container. The page body does not move.**
+
+Two traps make it hard to see from a desk:
+
+- **`documentElement.scrollWidth` cannot see it.** Measured on Settings → Secrets: it
+  read 393 on a 393px viewport while the content was 588px wide. Assert on element
+  right-edges versus `innerWidth`, or on `max(documentElement.scrollWidth, body.scrollWidth)`.
+- **A `width: 100%` table cannot shrink below its content's min-width.** One
+  `white-space: nowrap` cell therefore sets the width of the whole page.
+
+**What is mechanically checked, and what is not — the half worth knowing.** The Lens DOM
+critic raises a `wiggle` finding (severity high, one per run, naming the widest offender)
+on any capture at ≤820px **that passes `critic: "dom"`**. A high finding folds the F095
+gate to fail, and the auto-review skill passes the critic on every verify — so a card
+going THROUGH the gate is covered. **A `lens_capture` you write by hand is not**, because
+the daemon's critic default is `off`. Content inside a deliberate horizontal scroller is
+not flagged.
+
+So: verify every new surface with a Lens run at phone width **and pass the critic**. Then
+the gate tells you instead of the owner's thumb.
+
+### A button label never wraps to a second line
+
+Add `white-space: nowrap`. If it still does not fit, shorten the label — never let it
+break. The portal's "Afslut preview" wrapping to two lines is the reported case; it reads
+as broken, not as tight.
+
+### No native dialog, and no native form control
+
+`window.alert` / `confirm` / `prompt`, `<select>`, `<input type="date">`, `type="color"`,
+`type="range"`. They ignore every token on this page, break dark mode, and render in the
+OS's style rather than the product's. Reuse `components/ui/` or build it there. The one
+exception is `beforeunload`, which the browser owns.
