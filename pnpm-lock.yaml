@@ -21,8 +21,8 @@ importers:
   apps/server:
     dependencies:
       '@broberg/ai-sdk':
-        specifier: 0.36.7
-        version: 0.36.7
+        specifier: 0.37.3
+        version: 0.37.3
       '@broberg/config':
         specifier: 0.2.0
         version: 0.2.0(zod@4.4.3)
@@ -294,8 +294,8 @@ packages:
   '@better-fetch/fetch@1.1.21':
     resolution: {integrity: sha512-/ImESw0sskqlVR94jB+5+Pxjf+xBwDZF/N5+y2/q4EqD7IARUTSpPfIo8uf39SYpCxyOCtbyYpUrZ3F/k0zT4A==}
 
-  '@broberg/ai-sdk@0.36.7':
-    resolution: {integrity: sha512-lEUsqzNfwpEY6n7opuqTJ6Jze4erb2dzALshtQI7nVFDfZZKCEbD8DFhUHWNy4ZX1Uhg0RH18NaaEYL09bHWtw==}
+  '@broberg/ai-sdk@0.37.3':
+    resolution: {integrity: sha512-YRIPlYnJLmPiaaUH4FUOVTTSUXYQm03YHNHtbsS7ecrSNz+YaQMqp9nTJHyKdhRzP31LroJUnJT/W/ziI90VZQ==}
     engines: {bun: '>=1.3.0'}
 
   '@broberg/config@0.2.0':
@@ -2178,7 +2178,7 @@ snapshots:
 
   '@better-fetch/fetch@1.1.21': {}
 
-  '@broberg/ai-sdk@0.36.7':
+  '@broberg/ai-sdk@0.37.3':
     dependencies:
       zod: 3.25.76
 

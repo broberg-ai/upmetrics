@@ -25,11 +25,13 @@ describe('resolveCost — four states, because "0" has three meanings', () => {
   });
 
   it('an UNKNOWN model stays 0 but says "unpriced" — never "free"', () => {
-    // Measured 2026-09-03: the price list knows mistral, and does NOT know
-    // claude-sonnet-4-20250514, pixtral-large-latest, or the openrouter/deepseek
-    // ids. 92 of our 229 zero-cost rows land here. They must be readable as a
-    // FLOOR on the bill, not as a fact about it.
-    const r = R({ model: 'claude-sonnet-4-20250514', inputTokens: 31_427, outputTokens: 6_750 });
+    // A model the price list cannot know, ON PURPOSE. The first version of this
+    // test used claude-sonnet-4-20250514, measured as unknown on 2026-09-03 —
+    // and went red hours later when ai-sdk 0.37.3 added it. That was the test
+    // working: pinning a REAL gap makes the test a clock, not a contract. The
+    // contract is "an id the list does not know must never read as free", so the
+    // fixture is now an id that cannot become known.
+    const r = R({ model: 'no-such-model-in-any-catalogue-v9', inputTokens: 31_427, outputTokens: 6_750 });
     expect(r).toEqual({ costUsd: 0, source: 'unpriced' });
   });
 
