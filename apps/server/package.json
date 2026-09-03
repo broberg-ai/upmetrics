@@ -16,6 +16,7 @@
     "typescript": "^5.7.2"
   },
   "dependencies": {
+    "@broberg/ai-sdk": "0.36.7",
     "@broberg/config": "0.2.0",
     "@broberg/lens": "0.1.2",
     "@broberg/mail": "0.7.1",

@@ -14,6 +14,7 @@ import type { Context, Hono } from 'hono';
 import { and, eq } from 'drizzle-orm';
 import { z } from 'zod';
 import { getDb, schema } from '../db';
+import { resolveCost } from '../cost/price';
 
 // Coerce-then-require-finite: catches NaN/Infinity (e.g. cost_usd:"abc") instead
 // of silently persisting garbage. .default() short-circuits undefined to a valid
@@ -66,18 +67,23 @@ function projectFromKey(c: Context) {
 
 // Common metric fields shared by finish/record. `tags` already carries swept extras.
 function metrics(b: ParsedBody, tags: Record<string, unknown> | null) {
+  // F027 — a run that arrives without a price gets one from the fleet price
+  // list, and every run records WHERE its number came from. Stamped into tags
+  // rather than a new column: the distinction has to be visible today, and a
+  // total nobody can qualify is worth less than a smaller one you can.
+  const cost = resolveCost({ costUsd: b.cost_usd, model: b.model, inputTokens: b.input_tokens, outputTokens: b.output_tokens });
   return {
     inputTokens: b.input_tokens,
     outputTokens: b.output_tokens,
     cacheReadTokens: b.cache_read_tokens,
     cacheCreationTokens: b.cache_creation_tokens,
-    costUsd: b.cost_usd,
+    costUsd: cost.costUsd,
     toolCalls: b.tool_calls ?? null,
     artifacts: b.artifacts ?? null,
     promptExcerpt: b.prompt_excerpt ?? null,
     responseExcerpt: b.response_excerpt ?? null,
     errorIssueId: b.error_issue_id ?? null,
-    tags,
+    tags: { ...(tags ?? {}), cost_source: cost.source },
   };
 }
 
