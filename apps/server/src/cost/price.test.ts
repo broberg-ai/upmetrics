@@ -40,11 +40,22 @@ describe('resolveCost — four states, because "0" has three meanings', () => {
     expect(R({ model: 'unknown', inputTokens: 100, outputTokens: 10 }).source).toBe('unpriced');
   });
 
-  it('zero tokens AND zero cost is "untokened" — genuinely nothing to price', () => {
-    // 60 claude-code runs on prod report no token counts at all. Lumping these
-    // in with "unpriced" would make the unknown pile look bigger than it is.
+  it('neither tokens nor cost is "unaccountable" — NOT "this was free"', () => {
+    // Measured on prod 2026-09-03: this bucket is 60 runs, every one of them
+    // anthropic/claude-code. It runs on a subscription and reports neither
+    // token counts nor a price, so its usage is invisible in every total we
+    // publish. $0 is right as a bill and wrong as a measurement.
     const r = R({ model: 'claude-code', inputTokens: 0, outputTokens: 0 });
-    expect(r).toEqual({ costUsd: 0, source: 'untokened' });
+    expect(r).toEqual({ costUsd: 0, source: 'unaccountable' });
+  });
+
+  it('zero tokens is NOT enough to be unaccountable — a priced call is accounted for', () => {
+    // The row that decides the predicate. 305 prod runs have 0 tokens and a real
+    // cost ($5.12): fal prices per image or per second, azure per character.
+    // Those senders CAN account for themselves, so "has no tokens" would have
+    // swept 305 fully-known calls into the unknown pile.
+    const r = R({ model: 'fal-ai/flux/schnell', costUsd: 0.003, inputTokens: 0, outputTokens: 0 });
+    expect(r).toEqual({ costUsd: 0.003, source: 'reported' });
   });
 
   it('the four states are distinguishable from each other — the negative control', () => {
