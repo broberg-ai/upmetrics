@@ -68,7 +68,10 @@ export const config = {
   exportReadToken: process.env.EXPORT_READ_TOKEN ?? '',
   // F022.4 — low-balance alarm bands (USD remaining). warn → early heads-up,
   // critical → urgent. v1: global defaults for all providers (per-provider map later).
-  creditWarnBelowUsd: coerceNum('CREDIT_WARN_BELOW_USD', 10),
+  // Christian, 2026-09-04: "den skal ikke sige noget før den er under $8".
+  // Was 10, which put a warning on a balance he considered perfectly normal —
+  // and an alarm nobody acts on is the one that trains you to ignore the next.
+  creditWarnBelowUsd: coerceNum('CREDIT_WARN_BELOW_USD', 8),
   creditCriticalBelowUsd: coerceNum('CREDIT_CRITICAL_BELOW_USD', 2),
   // F023 — how often the live USD→DKK rate is refreshed (source is daily, so 12h
   // is plenty). usdToDkk (above) is the last-resort fallback default only.

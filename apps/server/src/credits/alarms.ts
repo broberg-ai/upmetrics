@@ -91,8 +91,23 @@ export function evalCreditAlarm(db: Db, projectId: string, snapshot: CreditSnaps
         eventsAtOpen: { remaining: snapshot.remaining, state, burn_rate_per_day: br.per_day, days_left: daysLeft },
       })
       .run();
-  } else if (open.severity !== severity) {
-    db.update(schema.incidents).set({ severity }).where(eq(schema.incidents.id, open.id)).run();
+  } else {
+    // KEEP THE TITLE CURRENT. It used to be written once, at open, and never
+    // again — so an incident opened on 30 August still read "$9.66 remaining"
+    // on 4 September when the balance was $7.41. Christian made a decision from
+    // that number, and it was five days old.
+    //
+    // A frozen title is not a cosmetic flaw on a balance alarm: the number IS
+    // the alarm. Same shape fd-sundhed reported on issues (a title fixed at the
+    // first event, so later, better messages never became visible).
+    const br = burnRate(recentSnapshots(db, snapshot.provider, 2));
+    const daysLeft = br.days_left == null ? null : Math.round(br.days_left * 10) / 10;
+    const title =
+      `${snapshot.provider} credits low: $${snapshot.remaining.toFixed(2)} remaining` +
+      (daysLeft == null ? '' : ` (~${daysLeft}d left at current burn)`);
+    if (open.severity !== severity || open.title !== title) {
+      db.update(schema.incidents).set({ severity, title }).where(eq(schema.incidents.id, open.id)).run();
+    }
   }
   return state;
 }
