@@ -95,6 +95,12 @@ export const config = {
   remediationBackoffMs: coerceInt('REMEDIATION_BACKOFF_MS', 500),
   // Fleet-scale alert-storm control (F008.3). Layers on top of F005.2 dedup.
   stormWindowMs: coerceInt('STORM_WINDOW_MS', 300_000), // 5 min correlation window
+  // F026.4 — how long before an UNCHANGED fleet roll-up is repeated. The window
+  // above governs how fast a CHANGE may be reported; this governs how often the
+  // same news is repeated at you. They were the same number (5 min), so a set of
+  // incidents that had not moved since the night before produced an identical
+  // "Major outage" message every few minutes, indefinitely.
+  stormRepeatMs: coerceInt('STORM_REPEAT_MS', 21_600_000), // 6h — matches the disk-guard re-alert
   stormProjectThreshold: coerceInt('STORM_PROJECT_THRESHOLD', 3), // distinct projects → fleet roll-up
   stormIncidentThreshold: coerceInt('STORM_INCIDENT_THRESHOLD', 5), // total open incidents → fleet roll-up
   // Incident kinds that are a "region/upmetrics-down" suppressor signal (AC2):

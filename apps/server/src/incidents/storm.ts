@@ -77,8 +77,40 @@ export function maintenanceMatch(
   return w ? `maintenance:${w.reason}` : null;
 }
 
-export function buildRollupMessage(plan: StormPlan): string {
-  return plan.rollupTitle ?? 'Fleet outage';
+// F026.4 — the roll-up must say WHICH. It returned only its own title, so the
+// Discord embed carried the same sentence as heading AND body: "Major outage: 4
+// incidents across 3 projects", twice, naming nothing. Christian's first question
+// on seeing it was "hvilke projekter" — which is the question the alarm exists to
+// answer. buildDigestMessage, twenty lines down in this same file, had listed
+// project + title per incident all along; the roll-up had the strictly worse
+// version of a message it sends far more often.
+//
+// Kind and severity are on the line because they are what decides whether to get
+// up: a five-day-old credit warning and a deploy that regressed ten minutes ago
+// are not the same news, and "4 incidents" renders them identical.
+export function buildRollupMessage(plan: StormPlan, items: Array<{ incident: Incident; project: Project }> = []): string {
+  const head = plan.rollupTitle ?? 'Fleet outage';
+  if (items.length === 0) return head;
+  const lines = items
+    .slice(0, 15)
+    .map((it) => `• [${it.incident.severity}] ${it.project.name} — ${it.incident.kind}: ${it.incident.title}`)
+    .join('\n');
+  return `${head}\n${lines}${items.length > 15 ? `\n…and ${items.length - 15} more` : ''}`;
+}
+
+/** The open incidents behind a roll-up, joined to their project for the message. */
+export function rollupItems(db: Db): Array<{ incident: Incident; project: Project }> {
+  const open = db.select().from(schema.incidents).where(eq(schema.incidents.status, 'open')).all();
+  const out: Array<{ incident: Incident; project: Project }> = [];
+  for (const incident of open) {
+    const project = db.select().from(schema.projects).where(eq(schema.projects.id, incident.projectId)).get();
+    // A project we cannot read is still an incident worth naming — fall back to
+    // the id rather than dropping the row. Silence about one is worse than an
+    // ugly name for it.
+    out.push({ incident, project: project ?? ({ id: incident.projectId, name: incident.projectId } as Project) });
+  }
+  // Newest first: the thing that just broke is the reason the message arrived.
+  return out.sort((a, b) => b.incident.openedAt.getTime() - a.incident.openedAt.getTime());
 }
 
 export function buildDigestMessage(items: Array<{ incident: Incident; project: Project }>): string {
@@ -99,6 +131,7 @@ export function _resetStormState(): void {
   bucket.windowStart = 0;
   lastRollupAt = 0;
   lastRollupCount = 0;
+  lastRollupFingerprint = '';
   lastDigestAt = 0;
 }
 
@@ -114,13 +147,37 @@ function takeToken(nowMs: number): boolean {
 
 let lastRollupAt = 0;
 let lastRollupCount = 0;
+let lastRollupFingerprint = '';
 let lastDigestAt = 0;
 
-// Re-send the roll-up only when the window has elapsed OR the outage grew
-// materially (escalation) — never every 30s tick.
-function shouldSendRollup(plan: StormPlan, nowMs: number): boolean {
-  if (nowMs - lastRollupAt >= config.stormWindowMs) return true;
-  return plan.openCount > Math.ceil(lastRollupCount * 1.5);
+// Re-send the roll-up when the outage CHANGES, not merely because time passed.
+//
+// The old rule re-sent whenever stormWindowMs (5 min) had elapsed, for as long
+// as the incidents stayed open — so an unchanged situation produced the same
+// sentence every few minutes, indefinitely. Measured 2026-09-04: the same "Major
+// outage: 4 incidents across 3 projects" arrived at 10:05, 10:05 and 10:15 about
+// a set that had not moved since the night before, one of whose members was a
+// five-day-old low-balance warning. That is the alarm teaching its reader to
+// scroll past alarms — the same fault F026 opened for, one layer up.
+//
+// So: a NEW or DEPARTED incident is news and goes out at once (subject to the
+// window). An unchanged set gets a much slower heartbeat, so an ongoing outage
+// is still visible without being repeated at you.
+function shouldSendRollup(plan: StormPlan, nowMs: number, fingerprint: string): boolean {
+  if (lastRollupAt === 0) return true; // first one always goes
+  const changed = fingerprint !== lastRollupFingerprint;
+  if (changed && nowMs - lastRollupAt >= config.stormWindowMs) return true;
+  // Growth is an escalation even inside the window.
+  if (plan.openCount > Math.ceil(lastRollupCount * 1.5)) return true;
+  return nowMs - lastRollupAt >= config.stormRepeatMs;
+}
+
+/** Identity of an outage: which incidents, at which severity. Order-independent. */
+export function rollupFingerprint(items: Array<{ incident: Incident }>): string {
+  return items
+    .map((it) => `${it.incident.id}:${it.incident.severity}`)
+    .sort()
+    .join('|');
 }
 
 // ── orchestrator (called by the worker tick) ─────────────────────────────────
@@ -153,8 +210,10 @@ export async function runAlertsStorm(db: Db, now: Date = new Date()): Promise<St
   };
 
   let rollupSent = false;
-  if (plan.mode === 'fleet' && shouldSendRollup(plan, nowMs)) {
-    await sendFleet(config.fleetAlertDiscordWebhook, buildRollupMessage(plan), 0xef4444);
+  const items = plan.mode === 'fleet' ? rollupItems(db) : [];
+  if (plan.mode === 'fleet' && shouldSendRollup(plan, nowMs, rollupFingerprint(items))) {
+    await sendFleet(config.fleetAlertDiscordWebhook, buildRollupMessage(plan, items), 0xef4444);
+    lastRollupFingerprint = rollupFingerprint(items);
     lastRollupAt = nowMs;
     lastRollupCount = plan.openCount;
     rollupSent = true;

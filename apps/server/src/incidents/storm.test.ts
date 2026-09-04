@@ -4,7 +4,7 @@ import { describe, it, expect, beforeEach } from 'bun:test';
 import { migrate } from 'drizzle-orm/bun-sqlite/migrator';
 import { createDb, schema, type Db } from '../db';
 import { config } from '../config';
-import { planStorm, runAlertsStorm, buildRollupMessage, _resetStormState } from './storm';
+import { planStorm, runAlertsStorm, buildRollupMessage, _resetStormState, rollupFingerprint } from './storm';
 
 const MIGRATIONS = new URL('../db/migrations', import.meta.url).pathname;
 
@@ -142,5 +142,55 @@ describe('F008.3 storm-control', () => {
     expect(res.fired).toBe(cap); // bucket capacity sent
     expect(res.digested).toBe(extra); // overflow diverted
     expect(res.digestSent).toBe(extra); // collapsed into one digest
+  });
+});
+
+// ── F026.4 — the roll-up must say WHICH, and must not repeat unchanged ───────
+describe('F026.4 roll-up content + repeat', () => {
+  const inc = (id: string, project: string, kind: string, severity: string, title: string, openedAt: Date) =>
+    ({ id, projectId: project, kind, severity, title, openedAt, status: 'open' }) as never;
+  const item = (id: string, project: string, kind: string, severity: string, title: string, mins: number) => ({
+    incident: inc(id, project, kind, severity, title, new Date(Date.UTC(2026, 8, 4, 8, 0) - mins * 60_000)),
+    project: { id: project, name: project } as never,
+  });
+
+  const PLAN = { mode: 'fleet' as const, openCount: 3, projectCount: 3, suppressorKinds: [], rollupTitle: 'Major outage: 3 incidents across 3 projects' };
+
+  it('names every incident — project, kind, severity and title', () => {
+    // The real 2026-09-04 set. The old message was the heading, twice, naming
+    // nothing; Christian's first question was "hvilke projekter".
+    const msg = buildRollupMessage(PLAN, [
+      item('a', 'buddy', 'error_spike', 'high', 'Error spike — 69 errors in window', 20),
+      item('b', 'trail', 'deploy_regression', 'high', 'app.trailmem.com deploy regressed (e6f2f19)', 500),
+      item('c', 'upmetrics', 'credit_low', 'high', 'openrouter credits low: $9.66 remaining', 7000),
+    ]);
+    expect(msg).toContain('Major outage: 3 incidents across 3 projects');
+    expect(msg).toContain('buddy');
+    expect(msg).toContain('trail');
+    expect(msg).toContain('upmetrics');
+    expect(msg).toContain('credit_low'); // the kind is what says "this is not an outage"
+    expect(msg).toContain('deploy regressed (e6f2f19)');
+  });
+
+  it('is more than its own heading — the whole defect in one assertion', () => {
+    const withItems = buildRollupMessage(PLAN, [item('a', 'buddy', 'error_spike', 'high', 'boom', 1)]);
+    expect(withItems.split('\n').length).toBeGreaterThan(1);
+    // And with nothing to list it degrades to the heading rather than to a lie.
+    expect(buildRollupMessage(PLAN, [])).toBe(PLAN.rollupTitle);
+  });
+
+  it('the fingerprint ignores ORDER but notices a severity change', () => {
+    const a = item('x', 'p', 'k', 'high', 't', 1);
+    const b = item('y', 'q', 'k', 'high', 't', 2);
+    expect(rollupFingerprint([a, b])).toBe(rollupFingerprint([b, a]));
+    const bWorse = item('y', 'q', 'k', 'critical', 't', 2);
+    expect(rollupFingerprint([a, b])).not.toBe(rollupFingerprint([a, bWorse]));
+  });
+
+  it('a new incident changes the fingerprint; the same set does not', () => {
+    const a = item('x', 'p', 'k', 'high', 't', 1);
+    const b = item('y', 'q', 'k', 'high', 't', 2);
+    expect(rollupFingerprint([a])).not.toBe(rollupFingerprint([a, b]));
+    expect(rollupFingerprint([a, b])).toBe(rollupFingerprint([a, b]));
   });
 });
