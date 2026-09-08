@@ -110,3 +110,69 @@ Negativ kontrol: de fire tilstande skal være indbyrdes forskellige fra samme fu
 ## Åbent
 
 **De 92 ukendte modeller.** Rigtige vej er at melde dem til `ai-sdk`, så prislisten vokser for hele flåden frem for at vi lapper lokalt. Ikke gjort endnu.
+
+---
+
+# F028.2 — dubletnøglen afsenderen sender, læser vi aldrig
+
+## Motivation
+
+Trail bad os 8. september udtrykkeligt om at fange en gentagelse: *«Den
+gentagelse jeres upsert skal fange, er … SAMME kald leveret to gange (et retry i
+vores fire-and-forget-post, en netværks-gentagelse).»* De sender en nøgle med
+netop det formål.
+
+Målt på prod samme dag (dansk tid 13.38.56), på deres allerførste ægte stempel:
+
+```
+tags.idempotencyKey       = "67c02772-…-505f436a2ac2:2026-09-08T11:38:56.850Z"
+kolonnen idempotency_key  = null
+trail-rækker med udfyldt kolonne: 0 af 35.417
+```
+
+Nøglen ankommer. Vi kigger et andet sted.
+
+## Årsag — og hvorfor ingen af siderne kunne se det
+
+`ingest/agent.ts:187` slår dubletter op på kroppens **topfelt**
+`idempotency_key`. `@broberg/ai-sdk` kan ikke sende det felt: dens cost-sink
+lægger alt hvad forbrugeren tilføjer ned i `tags` (`...usage.labels`), og
+kommentaren i 0.37.3 siger hvorfor, bevidst:
+
+> *"Consumer attribution labels (e.g. tenantId) ride in tags so no new top-level
+> field risks the strict-shape ingest schema (F011)."*
+
+Så afsenderen kan se at den sender en nøgle. Modtageren har en **testet** upsert.
+Og de to mødes aldrig. Vores egne prøver er grønne, fordi de sender topfeltet —
+ad den vej ingen forbruger faktisk kan bruge.
+
+Det er ugens fejlform igen, denne gang i en delt kontrakt: et felt der ligner at
+det gør noget. Konsekvensen er ikke kosmetisk — et retry bliver til to rækker,
+altså dobbelt-talt forbrug i et tal nogen træffer beslutninger på.
+
+## Løsning
+
+Accepter nøglen fra `tags.idempotencyKey` når topfeltet mangler. Topfeltet vinder
+når begge er sat.
+
+Målt før ændringen: præcis **1 række i hele basen** bærer `tags.idempotencyKey`,
+så at forfremme tagget kan ikke ændre historik for andre. Koblingen er med vilje
+bundet til ét navn — tags er ellers fri tekst, og at lade vilkårlige tags styre
+dubletlogik ville bytte én tavs fejl for en værre.
+
+## Non-goals
+
+**Flytte nøglen til et topfelt i `@broberg/ai-sdk`.** Det kræver en udgivelse og
+en opgradering i hvert forbrugende repo for noget vi lukker på vores egen side i
+én linje. Rejses hos `ai-sdk` hvis flere felter viser samme mønster.
+
+## Harness
+
+Prøven skal skelne to ting der ligner hinanden: at vi opretter få rækker, og at
+vi faktisk slår sammen. Derfor kører den negative kontrol i samme prøve — to
+POSTs med **forskellig** nøgle skal give **to** rækker.
+
+Aflæsningen sker fra basen med streng lighed, ikke fra svaret: svaret er
+afsenderens egen påstand om hvad der blev skrevet.
+
+Mutations-krav: fjernes fallback'en, skal prøve 1 og 2 gå røde.
