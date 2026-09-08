@@ -289,7 +289,14 @@ alone. Only Mistral takes a key; openai/deepseek/gemini cache automatically.
 - `GET https://upmetrics.org/api/issues` (default = unresolved; `?status=` filtrerer)
 - `POST https://upmetrics.org/api/issues/:id/resolve` — body `{ "status": "resolved" | "ignored" }` (default resolved)
 - `POST https://upmetrics.org/api/issues/resolve-all` — masse-luk alle åbne (støj-storme)
+- `GET https://upmetrics.org/api/issues/:id` + `/api/issues/:id/events` — **hvad** fejlen er (stack, release, environment, tags), så du ikke lukker i blinde. Et tomt `frames: []` er et ægte svar: eventet ankom uden stack.
 - Ikke optaget endnu? Bed upmetrics-sessionen om DSN + `uk_`-nøgle (`ask_peer({to:"upmetrics", …})`).
+
+**Og det samme for INCIDENTS — den anden halvdel af dit signal.** En incident (deploy-regression, error-spike, lav saldo) er dét der lander som alarm på Christians telefon, så den skal lukkes af det repo den handler om:
+- `GET https://upmetrics.org/api/incidents` (default = åbne; `?status=all|open|resolved|acknowledged`)
+- `POST https://upmetrics.org/api/incidents/:id/resolve` — body `{ "status": "resolved" | "acknowledged" }` (default resolved)
+- Samme `uk_`-nøgle, samme header. Du ser og rører kun dit eget projekts — et andet projekts id svarer 404.
+- En ukendt `?status=`-værdi giver **400 med de gyldige værdier**, aldrig en tom liste. I et fejl-API læses `[]` som «der er ikke noget galt», og det er den farligste måde at tage fejl på.
 
 ## Trail — second brain + RAG
 
