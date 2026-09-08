@@ -143,3 +143,62 @@ describe('POST /api/agent — idempotency_key upsert (daily cost re-push)', () =
     expect((await body(a)).run_id).not.toBe((await body(b)).run_id); // two distinct rows
   });
 });
+
+// F028.2 — the key a real sender can actually reach us with.
+//
+// The suite above sends `idempotency_key` at the top level, which is our
+// documented field and the one path no @broberg/ai-sdk consumer can use: that
+// SDK's cost-sink puts caller metadata into `tags`. So the tests were green on
+// the route nobody takes, while the route everyone takes silently deduped
+// nothing. Measured on prod 2026-09-08: 0 of 35,417 trail rows had the column
+// filled, and their newest row carried the key in tags.
+describe('POST /api/agent — dedup key arriving in tags (the SDK path)', () => {
+  const TAGKEY = '67c02772-0bc0-4f19-bfff-505f436a2ac2:2026-09-08T11:38:56.850Z';
+  const rowsForKey = (k: string) =>
+    getDb().select().from(schema.agentRuns).where(eq(schema.agentRuns.idempotencyKey, k)).all();
+
+  it('fills the column from tags.idempotencyKey when the top-level field is absent', async () => {
+    const res = await post({ ...base, tags: { idempotencyKey: TAGKEY, tenantId: 't-broberg-ai' }, cost_usd: 0.5 });
+    expect(res.status).toBe(200);
+    // Read the stored row back, with strict equality — the response is the
+    // handler's claim about what it wrote, not the database's answer.
+    const rows = rowsForKey(TAGKEY);
+    expect(rows.length).toBe(1);
+    expect(rows[0]!.idempotencyKey).toBe(TAGKEY);
+  });
+
+  it('a re-delivery of the SAME tag key collapses into ONE row, carrying the second body', async () => {
+    const res = await post({ ...base, tags: { idempotencyKey: TAGKEY, tenantId: 't-broberg-ai' }, cost_usd: 0.9 });
+    expect((await res.json() as { upserted: boolean }).upserted).toBe(true);
+    const rows = rowsForKey(TAGKEY);
+    expect(rows.length).toBe(1);
+    expect(rows[0]!.costUsd).toBeCloseTo(0.9);
+  });
+
+  // NEGATIVE CONTROL, in the same file on purpose: without it, "one row" is also
+  // what a handler that refuses to insert anything would produce.
+  it('a DIFFERENT tag key still inserts a separate row', async () => {
+    const other = `${TAGKEY}-anden-koersel`;
+    await post({ ...base, tags: { idempotencyKey: other }, cost_usd: 0.4 });
+    expect(rowsForKey(other).length).toBe(1);
+    expect(rowsForKey(TAGKEY).length).toBe(1); // untouched
+  });
+
+  it('the top-level field wins when both are set', async () => {
+    const top = 'top-level-vinder';
+    await post({ ...base, idempotency_key: top, tags: { idempotencyKey: 'tag-taber' }, cost_usd: 0.2 });
+    expect(rowsForKey(top).length).toBe(1);
+    expect(rowsForKey('tag-taber').length).toBe(0);
+  });
+
+  // A guessed key would merge two runs that are not the same run, so a value we
+  // cannot read as a key must be null — never coerced, never thrown.
+  it('a non-string or empty tags.idempotencyKey stores null, and does not throw', async () => {
+    for (const bad of ['', 42, null, { a: 1 }]) {
+      const res = await post({ ...base, tags: { idempotencyKey: bad }, cost_usd: 0.01 });
+      expect(res.status).toBe(200);
+      const row = rowById((await res.json() as { run_id: string }).run_id)!;
+      expect(row.idempotencyKey).toBeNull();
+    }
+  });
+});

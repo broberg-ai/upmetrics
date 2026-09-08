@@ -65,6 +65,27 @@ function projectFromKey(c: Context) {
   return getDb().select().from(schema.projects).where(eq(schema.projects.apiKey, key)).get() ?? null;
 }
 
+// F028.2 — where the dedup key is actually allowed to come from.
+//
+// The body's top-level `idempotency_key` is our documented field, but no consumer
+// using @broberg/ai-sdk can reach it: that SDK's cost-sink puts everything the
+// caller adds into `tags` on purpose ("so no new top-level field risks the
+// strict-shape ingest schema"). So a sender that sets a key sends it as
+// tags.idempotencyKey — and until this existed we looked straight past it.
+// Measured 2026-09-08 on prod: 0 of 35,417 trail rows had the column filled,
+// while their newest row carried the key in tags. A retry would have become two
+// rows, double-counting spend, with both ends looking green.
+//
+// Deliberately narrow: ONE tag name, and only when the top-level field is absent.
+// Tags are free-form, so letting arbitrary ones drive dedup would trade a silent
+// bug for a worse one. A non-string (or empty) value is null — never coerced,
+// because a guessed key would merge two runs that are not the same run.
+function resolveIdempotencyKey(top: string | null | undefined, tags: Record<string, unknown> | null): string | null {
+  if (typeof top === 'string' && top.length > 0) return top;
+  const fromTag = tags?.idempotencyKey;
+  return typeof fromTag === 'string' && fromTag.length > 0 ? fromTag : null;
+}
+
 // Common metric fields shared by finish/record. `tags` already carries swept extras.
 function metrics(b: ParsedBody, tags: Record<string, unknown> | null) {
   // F027 — a run that arrives without a price gets one from the fleet price
@@ -184,11 +205,12 @@ export function registerAgentRoutes(app: Hono): void {
 
     // Idempotent upsert: a repeated (project, idempotency_key) updates the row in
     // place, so a re-pushed growing daily aggregate never double-counts.
-    if (b.idempotency_key) {
+    const idemKey = resolveIdempotencyKey(b.idempotency_key, tags);
+    if (idemKey) {
       const existing = db
         .select({ id: schema.agentRuns.id })
         .from(schema.agentRuns)
-        .where(and(eq(schema.agentRuns.projectId, project.id), eq(schema.agentRuns.idempotencyKey, b.idempotency_key)))
+        .where(and(eq(schema.agentRuns.projectId, project.id), eq(schema.agentRuns.idempotencyKey, idemKey)))
         .get();
       if (existing) {
         db.update(schema.agentRuns).set(common).where(eq(schema.agentRuns.id, existing.id)).run();
@@ -198,7 +220,7 @@ export function registerAgentRoutes(app: Hono): void {
 
     const id = crypto.randomUUID();
     db.insert(schema.agentRuns)
-      .values({ id, projectId: project.id, idempotencyKey: b.idempotency_key ?? null, ...common })
+      .values({ id, projectId: project.id, idempotencyKey: idemKey, ...common })
       .run();
     return c.json({ run_id: id, upserted: false });
   });
