@@ -50,7 +50,8 @@ describe('computeVerdict', () => {
 import { migrate } from 'drizzle-orm/bun-sqlite/migrator';
 import { eq } from 'drizzle-orm';
 import { createDb, schema as sch, type Db as TDb } from '../db';
-import { resolveSupersededRegressions } from './regression';
+import { resolveSupersededRegressions, evaluateDeploy } from './regression';
+import { config } from '../config';
 
 const MIGR = new URL('../db/migrations', import.meta.url).pathname;
 const T0 = new Date('2026-08-26T12:00:00Z');
@@ -149,5 +150,48 @@ describe('F026.1 a deploy_regression retires when a later deploy is measured hea
     expect(resolveSupersededRegressions(db, good)).toBe(1);
     expect(resolveSupersededRegressions(db, good)).toBe(0); // idempotent
     expect(statusOf(db, inc)).toBe('resolved');
+  });
+});
+
+// F026.1 — the two negative controls that decide whether "closes correctly" can
+// be told apart from "closes whenever anything newer shows up".
+//
+// These drive evaluateDeploy, not resolveSupersededRegressions directly, because
+// the guard IS the branch at the call site: only a non-regressed verdict is
+// allowed to retire an older alarm. Testing the inner function alone would prove
+// the arithmetic and leave the actual decision untested.
+describe('F026.1 negative controls — a NEWER deploy is not, by itself, an answer', () => {
+  function errorsAt(db: TDb, from: Date, count: number) {
+    for (let i = 0; i < count; i++) {
+      const at = new Date(from.getTime() + (i + 1) * 1000);
+      db.insert(sch.events)
+        .values({ id: `ev_${++n}`, projectId: 'p', kind: 'error', receivedAt: at, occurredAt: at, payload: {} })
+        .run();
+    }
+  }
+
+  it('a newer deploy that is ITSELF regressed leaves the old alarm OPEN', () => {
+    const db = db2();
+    const bad = deploy(db, 'webhouse.app', 0);
+    const inc = regression(db, bad.id, 'webhouse.app');
+    const alsoBad = deploy(db, 'webhouse.app', 60);
+    // A clean baseline plus errors past the noise floor in the after-window is
+    // the "errors on a previously-clean surface" case — verdict: regressed.
+    errorsAt(db, alsoBad.updatedAt, config.deployRegressionMinAfter + 1);
+
+    const res = evaluateDeploy(db, alsoBad, new Date(alsoBad.updatedAt.getTime() + 60_000));
+    expect(res.verdict).toBe('regressed');
+    expect(statusOf(db, inc)).toBe('open'); // a sick successor answers nothing
+  });
+
+  it('a newer deploy that was never EVALUATED leaves the old alarm OPEN — "unmeasured" is not "healthy"', () => {
+    const db = db2();
+    const bad = deploy(db, 'webhouse.app', 0);
+    const inc = regression(db, bad.id, 'webhouse.app');
+    const later = deploy(db, 'webhouse.app', 60);
+
+    // The row exists and is newer. Nothing evaluated it, so its verdict is null.
+    expect(db.select().from(sch.deployEvents).where(eq(sch.deployEvents.id, later.id)).get()!.regressionVerdict).toBeNull();
+    expect(statusOf(db, inc)).toBe('open');
   });
 });
