@@ -7,7 +7,7 @@
 // after they deleted the real one. A test of your model of the thing is not a
 // test of the thing.
 import { describe, it, expect, beforeEach } from 'bun:test';
-import { deliver, getLostEvents, _queueDepth, _resetDelivery } from '../src/delivery.js';
+import { deliver, flush, getLostEvents, _queueDepth, _resetDelivery } from '../src/delivery.js';
 
 // A scheduler that runs the callback immediately, so a test never waits out a
 // real backoff. Returns a plain object so the unref() guard is exercised too.
@@ -193,5 +193,187 @@ describe('F029.1 telemetry never breaks the host app', () => {
       expect(() => p()).not.toThrow();
       await settle();
     }
+  });
+});
+
+// F029.2 — flush(), so a dying process does not have to guess our retry schedule.
+//
+// Reported by fd-sundhed with a measurement, and the bug was OURS: their 2s
+// send-budget was correct under 0.4.1 (one attempt) and silently stopped
+// covering the third attempt when 0.5.0 added retries totalling 6s. Nothing went
+// red on their side. A caller must never need to know RETRY_DELAYS_MS exists.
+describe('F029.2 flush() waits for outstanding telemetry', () => {
+  it('resolves only AFTER the in-flight fetch actually ran', async () => {
+    let resolveFetch: ((v: unknown) => void) | null = null;
+    let called = false;
+    const f = () =>
+      new Promise((r) => {
+        called = true;
+        resolveFetch = r;
+      });
+    deliver('https://u.test/e', 'body', f as never, now as never);
+
+    // The point of the assertion: not "a call was started" but "the call
+    // completed before flush handed control back".
+    let flushed = false;
+    const p = flush(1_000, f as never).then((r) => {
+      flushed = true;
+      return r;
+    });
+    expect(called).toBe(true);
+    expect(flushed).toBe(false); // still waiting on the fetch
+
+    resolveFetch!(ok);
+    const res = await p;
+    expect(flushed).toBe(true);
+    expect(res.delivered).toBe(1);
+  });
+
+  // The scheduler NEVER fires. Without skipping the remaining backoff this hangs
+  // — which is exactly what a suspending machine experiences.
+  it('skips the remaining backoff — a queued retry is attempted immediately', async () => {
+    let calls = 0;
+    const f = async () => {
+      calls += 1;
+      return calls === 1 ? fail(503) : ok;
+    };
+    const never = () => ({});
+    deliver('https://u.test/e', 'body', f as never, never as never);
+    await settle();
+    expect(calls).toBe(1); // parked behind a backoff that will never elapse
+
+    const res = await flush(1_000, f as never);
+    expect(calls).toBe(2); // flush drove it without waiting
+    expect(res.delivered).toBe(1);
+    expect(res.pending).toBe(0);
+  });
+
+  // `lost` = we gave up. `pending` = we ran out of time. Folding the second into
+  // the first turns "unknown" into a confident wrong answer at shutdown.
+  it('pending is NOT lost: a fetch that never answers times out as pending', async () => {
+    const f = () => new Promise(() => {}); // never settles
+    deliver('https://u.test/e', 'body', f as never, now as never);
+
+    const res = await flush(50, f as never);
+    expect(res.pending).toBeGreaterThan(0);
+    expect(res.lost).toBe(0); // nothing was given up on — we just don't know yet
+    expect(res.delivered).toBe(0);
+  });
+
+  it('and a genuinely permanent failure IS lost, not pending', async () => {
+    const f = async () => fail(400);
+    deliver('https://u.test/e', 'body', f as never, now as never);
+    await settle();
+
+    const res = await flush(200, f as never);
+    expect(res.lost + getLostEvents()).toBeGreaterThan(0);
+    expect(res.pending).toBe(0);
+  });
+
+  it('an empty queue flushes instantly with zeros — measured, not defaulted', async () => {
+    const res = await flush(1_000, (async () => ok) as never);
+    expect(res).toEqual({ delivered: 0, lost: 0, pending: 0 });
+
+    // The same call on a NON-empty queue must not produce zeros, or the test
+    // above proves nothing.
+    deliver('https://u.test/e', 'body', (async () => ok) as never, now as never);
+    const res2 = await flush(1_000, (async () => ok) as never);
+    expect(res2.delivered).toBe(1);
+  });
+
+  it('never throws — fetch that throws, a 500, and a throw from inside the flush', async () => {
+    for (const f of [
+      async () => {
+        throw new Error('boom');
+      },
+      async () => fail(500),
+    ]) {
+      _resetDelivery();
+      deliver('https://u.test/e', 'b', f as never, now as never);
+      await expect(flush(100, f as never)).resolves.toBeDefined();
+    }
+
+    _resetDelivery();
+    let n = 0;
+    const throwsOnRetry = async () => {
+      n += 1;
+      if (n === 1) return fail(503);
+      throw new Error('boom during flush');
+    };
+    const never2 = () => ({});
+    deliver('https://u.test/e', 'b', throwsOnRetry as never, never2 as never);
+    await settle();
+    await expect(flush(200, throwsOnRetry as never)).resolves.toBeDefined();
+  });
+});
+
+// Found by mutation, not by design: replacing `immediate` with a never-firing
+// scheduler left all 16 tests green, because flush()'s loop re-claims the queue
+// each pass. So the skip is NOT what `immediate` protects. What it protects is
+// the state AFTER a flush — the drain chain has to complete, or `draining` stays
+// true forever and every later deliver() enqueues into a queue nothing drains.
+// A telemetry client that goes quiet after one shutdown flush would be a silent
+// failure of exactly the kind this whole card exists to remove.
+describe('F029.2 a flush leaves the client usable', () => {
+  it('normal delivery still works after a flush that drove a queued retry', async () => {
+    const never = () => ({});
+    let calls = 0;
+    const flaky = async () => {
+      calls += 1;
+      return calls === 1 ? fail(503) : ok;
+    };
+    deliver('https://u.test/e', 'first', flaky as never, never as never);
+    await settle();
+    await flush(500, flaky as never);
+
+    // Now a fresh event, again with a scheduler that never fires. It must be
+    // ATTEMPTED — if the drain chain were stuck, this never leaves the queue.
+    let later = 0;
+    const f2 = async () => {
+      later += 1;
+      return ok;
+    };
+    deliver('https://u.test/e', 'second', f2 as never, never as never);
+    await settle();
+    expect(later).toBe(1);
+
+    // And a failing one must still reach flush afterwards.
+    let third = 0;
+    const f3 = async () => {
+      third += 1;
+      return third === 1 ? fail(503) : ok;
+    };
+    deliver('https://u.test/e', 'third', f3 as never, never as never);
+    await settle();
+    const res = await flush(500, f3 as never);
+    expect(third).toBe(2);
+    expect(res.delivered).toBe(1);
+  });
+});
+
+// The defect the mutation hunt actually turned up: flush() claims the parked
+// entry, which kills the drain chain — but `draining` stayed true, so afterwards
+// enqueue() never started a new one. Every later failed delivery would sit in
+// the queue retrying never, until some future flush happened to rescue it.
+describe('F029.2 retrying still works ON ITS OWN after a flush', () => {
+  it('a delivery that fails AFTER a flush is retried without another flush', async () => {
+    const never = () => ({});
+    const flaky = async () => fail(503);
+    deliver('https://u.test/e', 'parks-one', flaky as never, never as never);
+    await settle();
+    await flush(300, flaky as never); // claims the parked entry
+
+    // Now a normal failing delivery with a scheduler that DOES fire. Nothing
+    // flushes it — the client must drive its own retry.
+    let calls = 0;
+    const f = async () => {
+      calls += 1;
+      return calls === 1 ? fail(503) : ok;
+    };
+    deliver('https://u.test/e', 'after', f as never, now as never);
+    await settle();
+
+    expect(calls).toBe(2); // it retried by itself
+    expect(_queueDepth()).toBe(0);
   });
 });

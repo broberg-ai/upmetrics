@@ -5,7 +5,7 @@
 // tolerant, which hid this until a Node-ESM consumer — Vite dev-SSR — hit it).
 import { scrub } from './scrub.js';
 import { SDK_VERSION } from './version.js';
-import { deliver, getLostEvents } from './delivery.js';
+import { deliver, flush as flushDelivery, getLostEvents, type FlushResult } from './delivery.js';
 
 export interface InitOptions {
   dsn: string;
@@ -402,3 +402,30 @@ export { scrub, maskString } from './scrub.js';
 export function lostEvents(): number {
   return getLostEvents();
 }
+
+/**
+ * F029.2 — wait for outstanding error reports before this process stops.
+ *
+ * Call it in a shutdown/suspend path (a Fly machine that sleeps once its cron
+ * route answers, a serverless handler, a CLI about to exit). Without it those
+ * in-flight sends die with the process, and a consumer has to keep it alive on a
+ * magic number matching THIS package's private retry schedule — which is exactly
+ * what broke when 0.5.0 added retries: a 2s budget that was correct under 0.4.1
+ * silently stopped covering the last attempt. Nothing went red anywhere.
+ *
+ * Remaining backoff is skipped: waiting out a 5s pause is pointless when you are
+ * shutting down, so `timeoutMs` is purely your own answer to "how long am I
+ * willing to wait" — you never have to know what our delays are.
+ *
+ * ```ts
+ * const { delivered, lost, pending } = await flush(3000);
+ * ```
+ *
+ * `pending > 0` means the deadline passed with work outstanding. That is NOT the
+ * same as `lost` (we gave up): one is unknown, the other is decided. Never throws.
+ */
+export function flush(timeoutMs?: number): Promise<FlushResult> {
+  return flushDelivery(timeoutMs);
+}
+
+export type { FlushResult };

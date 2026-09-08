@@ -116,3 +116,61 @@ sidste er værre end ingen retry.
 SDK-udgivelse sker **kun via CI** (tag `sdk-v*` → `publish-sdk.yml`, OIDC).
 Aldrig lokal `npm publish`. Når versionen er ude, skal de forbrugende repoer
 have besked om at bumpe — stående instruks.
+
+
+---
+
+# F029.2 — flush()
+
+## Motivation, og den er vores egen fejl
+
+fd-sundhed opgraderede til 0.5.0 og målte hvad vores udgivelse gjorde ved dem:
+
+```
+deres AFSENDELSES_FRIST_MS = 2_000
+0.4.1  ét forsøg                       → 2 s var rigeligt
+0.5.0  RETRY_DELAYS_MS = [1000, 5000]  → op til 6 s
+```
+
+**Vores retry gjorde deres konstant forkert.** Maskinen — en Fly-maskine der
+suspenderer så snart cron-ruten har svaret — døde inden TREDJE forsøg, altså
+netop det forsøg der findes til når vi er nede. Ingen prøve gik rød. Ingen linje
+ændrede sig hos dem.
+
+Det er sessionens gennemgående fejlform én gang til: **en ændring der gør en
+eksisterende korrekt værdi forkert, tavst, i den grønne retning.**
+
+## Hvorfor en lappeløsning ikke er nok
+
+De hævede fristen til 6.500 ms og skrev en vagt der **læser** vores
+`RETRY_DELAYS_MS` frem for at gentage tallet. Det er den rigtige lokale
+rettelse — men den er en kobling til vores **private** konstanter, og den brød
+ved allerførste retry-udgivelse. Uden `flush()` skal hver forbruger holde på et
+magisk tal der matcher en tidsplan de ikke kan se.
+
+## Design
+
+`flush(timeoutMs)`:
+
+1. **Springer resterende backoff over.** At vente 5 sekunder på en pause er
+   meningsløst når processen er ved at lukke ned — en nedluknings-tømning skal
+   forsøge NU. Det er samtidig dét der fjerner koblingen til `RETRY_DELAYS_MS`
+   helt: fristen bliver forbrugerens eget valg om hvor længe de vil vente.
+2. **Returnerer tre tal, ikke to:** `delivered`, `lost`, `pending`.
+   `pending > 0` betyder *«fristen løb ud før vi blev færdige»* og må aldrig
+   kunne forveksles med `lost` — det ene er **ukendt**, det andet er **opgivet**.
+   Kollapses de, forsvinder netop den skelnen tælleren findes for.
+3. **Kaster aldrig, og hænger aldrig.** En nedluknings-tømning der selv blokerer
+   er værre end ingen.
+
+## Den anden halvdel, som flush() også løser
+
+`lostEvents()` nulstilles ved genstart. På en maskine der suspenderer mellem
+cron-kørsler er tælleren derfor så godt som altid 0 — **ubrugelig præcis i den
+driftsform**. Kan man AFVENTE tømningen, kan man læse tallet mens processen
+stadig lever, og så betyder det noget.
+
+## Harness
+
+Prøven for backoff-overspringet bruger en scheduler der **aldrig fyrer**. Uden
+overspringet hænger den — hvilket er nøjagtig det en døende proces oplever.
