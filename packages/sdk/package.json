@@ -1,7 +1,7 @@
 {
   "name": "@upmetrics/sdk",
-  "version": "0.4.1",
-  "description": "Upmetrics error-tracking SDK for browser/node/bun \u2014 Sentry-envelope compatible, PII-scrubbed.",
+  "version": "0.5.0",
+  "description": "Upmetrics error-tracking SDK for browser/node/bun — Sentry-envelope compatible, PII-scrubbed.",
   "license": "MIT",
   "type": "module",
   "main": "./dist/index.js",

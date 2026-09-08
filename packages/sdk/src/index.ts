@@ -5,6 +5,7 @@
 // tolerant, which hid this until a Node-ESM consumer — Vite dev-SSR — hit it).
 import { scrub } from './scrub.js';
 import { SDK_VERSION } from './version.js';
+import { deliver, getLostEvents } from './delivery.js';
 
 export interface InitOptions {
   dsn: string;
@@ -276,14 +277,11 @@ function send(event: Record<string, unknown>): string | null {
     '\n' +
     JSON.stringify(payload);
 
-  void fetch(url, {
-    method: 'POST',
-    headers: { 'content-type': 'application/x-sentry-envelope' },
-    body,
-    keepalive: true,
-  }).catch(() => {
-    // fire-and-forget — telemetry must never throw into the host app.
-  });
+  // F029.1 — one attempt with no retry and no counter meant a failed send simply
+  // vanished, and `res.ok` was never read, so a 500 looked exactly like success.
+  // deliver() retries the retryable cases and counts what it gives up on; it is
+  // still fire-and-forget from here, and still never throws into the host app.
+  deliver(url, body, fetch as never);
   return event.event_id as string;
 }
 
@@ -390,3 +388,17 @@ function installAutoInstrument(): void {
 }
 
 export { scrub, maskString } from './scrub.js';
+
+/**
+ * F029.1 — how many events this client GAVE UP on: the retry queue overflowed,
+ * or every attempt failed.
+ *
+ * Read it alongside whether anything was ever sent. "0 after a failed delivery"
+ * and "0 because nothing was ever sent" are different facts, and only the first
+ * is evidence that nothing was lost. The counter is in-process and resets on
+ * restart, so a zero is a statement about this process's uptime, not about
+ * history.
+ */
+export function lostEvents(): number {
+  return getLostEvents();
+}
