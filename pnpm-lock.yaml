@@ -33,8 +33,8 @@ importers:
         specifier: 0.7.1
         version: 0.7.1
       '@upmetrics/sdk':
-        specifier: ^0.4.1
-        version: 0.4.1
+        specifier: ^0.5.0
+        version: 0.5.0
       better-auth:
         specifier: ^1.6.11
         version: 1.6.11(drizzle-kit@0.31.10)(drizzle-orm@0.45.2(bun-types@1.3.14)(kysely@0.28.17))(react-dom@19.2.6(react@19.2.6))(react@19.2.6)
@@ -1281,8 +1281,8 @@ packages:
   '@types/node@25.9.1':
     resolution: {integrity: sha512-xfrlY7UD5rMJk3ZVJP8BNzS28J36YJg+xp+LPXV1TdWxr8uMH5A860QNxYDGQe/ylDSgjxE52Q9VnO7p75tJxg==}
 
-  '@upmetrics/sdk@0.4.1':
-    resolution: {integrity: sha512-IQLYbVqOW13knyxIoAU9GNdilHtDts4EiXhSvF8UqV92CxqnbFArULDTyOEbThlR/m6tl/3GLnpeXJaywJMduQ==}
+  '@upmetrics/sdk@0.5.0':
+    resolution: {integrity: sha512-rOHOJDB3jIOmWDrt4hxvfR4JS0+qo8p03P5fzwdOa9c5YS1BmzS5wn45wKB2/YZjAy2Vf+T5MHANMa4SDceOpw==}
 
   babel-plugin-transform-hook-names@1.0.2:
     resolution: {integrity: sha512-5gafyjyyBTTdX/tQQ0hRgu4AhNHG/hqWi0ZZmg2xvs2FgRkJXzDNKBZCyoYqgFkovfDrgM8OoKg8karoUvWeCw==}
@@ -2775,7 +2775,7 @@ snapshots:
     dependencies:
       undici-types: 7.24.6
 
-  '@upmetrics/sdk@0.4.1': {}
+  '@upmetrics/sdk@0.5.0': {}
 
   babel-plugin-transform-hook-names@1.0.2(@babel/core@7.29.7):
     dependencies:
