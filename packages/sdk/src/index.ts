@@ -418,8 +418,16 @@ export function lostEvents(): number {
  * willing to wait" — you never have to know what our delays are.
  *
  * ```ts
- * const { delivered, lost, pending } = await flush(3000);
+ * const { ok, lost, pending } = await flush(3000);
+ * if (!ok) console.warn(`telemetry: ${lost} lost, ${pending} unresolved`);
  * ```
+ *
+ * READ `ok`, NOT `deliveredDuringFlush`. The delta counts what the FLUSH did, so
+ * it is 0 in exactly the healthy case — a send that succeeded on its first
+ * attempt was already counted before flush() ran. fd-sundhed caught
+ * `delivered > 0` reading as "it worked" and reporting failure on every
+ * successful alarm: a false negative on the happy path. The field was renamed
+ * rather than merely documented, because the next reader reads the name.
  *
  * `pending > 0` means the deadline passed with work outstanding. That is NOT the
  * same as `lost` (we gave up): one is unknown, the other is decided. Never throws.

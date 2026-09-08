@@ -174,3 +174,44 @@ stadig lever, og så betyder det noget.
 
 Prøven for backoff-overspringet bruger en scheduler der **aldrig fyrer**. Uden
 overspringet hænger den — hvilket er nøjagtig det en døende proces oplever.
+
+
+---
+
+# F029.3 — `ok`, fordi det oplagte felt løj på den lykkelige vej
+
+## Fejlen, fundet af fd-sundhed i et API der var en time gammelt
+
+```ts
+const { delivered } = await flush(3000);
+return delivered > 0;          // ← forkert
+```
+
+`deliveredEvents` tælles op når **første POST lykkes** — altså før `flush()`
+overhovedet kaldes. Deltaet er derfor **0 netop når intet gik galt**, og den
+naturlige aflæsning af navnet melder «ikke sendt» på hver eneste vellykket alarm.
+
+**Et falsk negativt på den lykkelige vej.** De fangede den kun ved at læse
+`attempt()` før de stolede på returværdien.
+
+## Hvorfor dokumentation var den svage rettelse
+
+De foreslog en doc-kommentar, og det var rimeligt. Men den næste forbruger læser
+**navnet**, ikke kommentaren — `delivered` lyder som et resultat og er et delta.
+
+Så: feltet hedder nu `deliveredDuringFlush`, og `ok` er tilføjet som det
+prædikat en kalder faktisk vil have. De brugte selv `lost === 0 && pending === 0`,
+men måtte udlede det. Det bør API'et levere.
+
+Omdøbningen er bevidst frem for en tilføjelse: en forbruger på det gamle navn får
+en **typefejl**, ikke en tavs `undefined`.
+
+## Harness
+
+Prøven skal fange **fælden**, ikke omdøbningen — ellers ville «feltet fik et
+længere navn» ligne en rettelse. Derfor hævder den første prøve head-on: en
+levering der lykkedes FØR flush giver delta 0 **og** `ok: true`.
+
+`ok` kan være falsk på tre måder, og de har hver sin prøve: noget tabt · noget
+udestående · begge dele. Mutations-bevist: `ok` som konstant true → 3 røde;
+`pending` fjernet fra udregningen → prøven for udestående arbejde rød.

@@ -88,8 +88,29 @@ export function _resetDelivery(): void {
 }
 
 export interface FlushResult {
-  /** Attempts that reached the server with an ok response. */
-  delivered: number;
+  /**
+   * TRUE when nothing was given up on and nothing is still outstanding — the
+   * predicate a caller actually wants, provided so nobody has to derive it.
+   *
+   * This field exists because the obvious alternative is a trap: see
+   * `deliveredDuringFlush`.
+   */
+  ok: boolean;
+  /**
+   * Deliveries that succeeded DURING this flush. A delta, not a result.
+   *
+   * IT DOES NOT ANSWER "did my message get through", and it is 0 in exactly the
+   * happy case: a send that succeeded on its first attempt was already counted
+   * before flush() was ever called, so there is nothing left for the flush to
+   * do. fd-sundhed caught `delivered > 0` reading as success and reporting
+   * failure on every healthy alarm — a false negative on the happy path, found
+   * only because they read attempt() before trusting the return value. The old
+   * name was `delivered`; it was renamed rather than documented, because the
+   * next consumer reads the NAME.
+   *
+   * For "did it work", use `ok`.
+   */
+  deliveredDuringFlush: number;
   /** Events given up on: a permanent status, attempts exhausted, or evicted. */
   lost: number;
   /**
@@ -152,10 +173,13 @@ export async function flush(timeoutMs = 5_000, fetchImpl?: FetchLike): Promise<F
     // A flush must never become the reason a shutdown fails.
   }
 
+  const lost = lostEvents - startedLost;
+  const pending = queue.length + inFlight.size + (parked ? 1 : 0);
   return {
-    delivered: deliveredEvents - startedDelivered,
-    lost: lostEvents - startedLost,
-    pending: queue.length + inFlight.size + (parked ? 1 : 0),
+    ok: lost === 0 && pending === 0,
+    deliveredDuringFlush: deliveredEvents - startedDelivered,
+    lost,
+    pending,
   };
 }
 

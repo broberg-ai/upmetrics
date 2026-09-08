@@ -226,7 +226,7 @@ describe('F029.2 flush() waits for outstanding telemetry', () => {
     resolveFetch!(ok);
     const res = await p;
     expect(flushed).toBe(true);
-    expect(res.delivered).toBe(1);
+    expect(res.deliveredDuringFlush).toBe(1);
   });
 
   // The scheduler NEVER fires. Without skipping the remaining backoff this hangs
@@ -244,7 +244,7 @@ describe('F029.2 flush() waits for outstanding telemetry', () => {
 
     const res = await flush(1_000, f as never);
     expect(calls).toBe(2); // flush drove it without waiting
-    expect(res.delivered).toBe(1);
+    expect(res.deliveredDuringFlush).toBe(1);
     expect(res.pending).toBe(0);
   });
 
@@ -257,7 +257,7 @@ describe('F029.2 flush() waits for outstanding telemetry', () => {
     const res = await flush(50, f as never);
     expect(res.pending).toBeGreaterThan(0);
     expect(res.lost).toBe(0); // nothing was given up on — we just don't know yet
-    expect(res.delivered).toBe(0);
+    expect(res.deliveredDuringFlush).toBe(0);
   });
 
   it('and a genuinely permanent failure IS lost, not pending', async () => {
@@ -272,13 +272,13 @@ describe('F029.2 flush() waits for outstanding telemetry', () => {
 
   it('an empty queue flushes instantly with zeros — measured, not defaulted', async () => {
     const res = await flush(1_000, (async () => ok) as never);
-    expect(res).toEqual({ delivered: 0, lost: 0, pending: 0 });
+    expect(res).toEqual({ ok: true, deliveredDuringFlush: 0, lost: 0, pending: 0 });
 
     // The same call on a NON-empty queue must not produce zeros, or the test
     // above proves nothing.
     deliver('https://u.test/e', 'body', (async () => ok) as never, now as never);
     const res2 = await flush(1_000, (async () => ok) as never);
-    expect(res2.delivered).toBe(1);
+    expect(res2.deliveredDuringFlush).toBe(1);
   });
 
   it('never throws — fetch that throws, a 500, and a throw from inside the flush', async () => {
@@ -347,7 +347,7 @@ describe('F029.2 a flush leaves the client usable', () => {
     await settle();
     const res = await flush(500, f3 as never);
     expect(third).toBe(2);
-    expect(res.delivered).toBe(1);
+    expect(res.deliveredDuringFlush).toBe(1);
   });
 });
 
@@ -375,5 +375,53 @@ describe('F029.2 retrying still works ON ITS OWN after a flush', () => {
 
     expect(calls).toBe(2); // it retried by itself
     expect(_queueDepth()).toBe(0);
+  });
+});
+
+// F029.3 — the trap fd-sundhed found in an API one hour old.
+//
+// `deliveredDuringFlush` counts what the FLUSH did. A send that succeeded on its
+// first attempt was already counted before flush() ran, so the delta is 0 in
+// exactly the healthy case — and `delivered > 0`, the natural reading of the old
+// name, reported failure on every successful alarm. A false negative on the
+// happy path. These tests pin the trap itself, not just the rename: without the
+// first one, "the field got a longer name" would look like a fix.
+describe('F029.3 ok is the predicate; the delta is not', () => {
+  it('a delivery that SUCCEEDED before flush leaves the delta at 0 — and ok true', async () => {
+    const f = async () => ok;
+    deliver('https://u.test/e', 'body', f as never, now as never);
+    await settle();
+
+    const res = await flush(500, f as never);
+    expect(res.deliveredDuringFlush).toBe(0); // the trap, asserted head-on
+    expect(res.ok).toBe(true); // and the field a caller should read
+  });
+
+  it('ok is false when something was LOST', async () => {
+    const f = async () => fail(400);
+    deliver('https://u.test/e', 'body', f as never, now as never);
+    const res = await flush(300, f as never);
+    expect(res.lost).toBeGreaterThan(0);
+    expect(res.ok).toBe(false);
+  });
+
+  it('ok is false when something is still PENDING — not only when it is lost', async () => {
+    const f = () => new Promise(() => {}); // never settles
+    deliver('https://u.test/e', 'body', f as never, now as never);
+    const res = await flush(50, f as never);
+    expect(res.lost).toBe(0); // nothing given up on
+    expect(res.pending).toBeGreaterThan(0);
+    expect(res.ok).toBe(false); // still not "it worked"
+  });
+
+  it('ok is false when BOTH happened', async () => {
+    const dead = async () => fail(400);
+    deliver('https://u.test/e', 'lost-one', dead as never, now as never);
+    const hang = () => new Promise(() => {});
+    deliver('https://u.test/e', 'pending-one', hang as never, now as never);
+    const res = await flush(50, hang as never);
+    expect(res.lost).toBeGreaterThan(0);
+    expect(res.pending).toBeGreaterThan(0);
+    expect(res.ok).toBe(false);
   });
 });
