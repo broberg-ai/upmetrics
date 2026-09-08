@@ -84,7 +84,21 @@ export function _resetDelivery(): void {
  *   That is temporary BY CONSTRUCTION — the window rolls — and it fires during a
  *   burst, which is exactly when the events matter. Treating it as permanent
  *   dropped precisely the flood we were trying to capture.
- * - **408 Request Timeout.** A transport-level timeout, not a bad request.
+ * - **408 Request Timeout.** A timeout says the request RAN OUT — it does not
+ *   say the server declined to process it. So a retry after 408 can genuinely
+ *   duplicate. It is safe HERE, and only here, because the receiver is always an
+ *   Upmetrics ingest (this client cannot be pointed anywhere else) and that
+ *   ingest keys `events.id` on the sender's own `event_id` with
+ *   `.onConflictDoNothing()`. The duplicate is absorbed.
+ *
+ * DO NOT COPY THIS LIST WITHOUT THAT PRECONDITION. `components` made the point
+ * with their own package: `@broberg/sms` deliberately does NOT retry 408,
+ * because there a duplicate is a second real SMS to a real phone, billed, read
+ * by an annoyed human. Same status code, opposite correct decision. The rule is
+ * not "429 + 5xx + 408" — it is *what provably did not run, plus what the
+ * receiver can deduplicate*, and the second half is a property of the
+ * deployment, not of HTTP. (429 needs no such argument: a refusal on a rate
+ * limit means the call never executed, so there is nothing to duplicate.)
  *
  * Found by the Discovery reuse check rather than by a test: `@broberg/sms`
  * 0.10.0 already classifies retryable (429, 5xx) against permanent (400/401/
