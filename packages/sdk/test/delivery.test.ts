@@ -68,6 +68,53 @@ describe('F029.1 a failed delivery is retried', () => {
     expect(getLostEvents()).toBe(1);
   });
 
+  // 0.5.0 got this wrong: `status >= 500` treated a 429 as permanent. Our OWN
+  // ingest answers 429 when a project trips its rolling rate limit — temporary by
+  // construction, and fired during a burst, i.e. exactly when the events matter.
+  it('a 429 IS retried — our own ingest returns it when rate-limited', async () => {
+    let calls = 0;
+    const f = async () => {
+      calls += 1;
+      return calls === 1 ? fail(429) : ok;
+    };
+    deliver('https://u.test/e', 'body', f as never, now as never);
+    await settle();
+
+    expect(calls).toBe(2);
+    expect(getLostEvents()).toBe(0);
+  });
+
+  it('a 408 request-timeout IS retried — transport, not a bad request', async () => {
+    let calls = 0;
+    const f = async () => {
+      calls += 1;
+      return calls === 1 ? fail(408) : ok;
+    };
+    deliver('https://u.test/e', 'body', f as never, now as never);
+    await settle();
+
+    expect(calls).toBe(2);
+    expect(getLostEvents()).toBe(0);
+  });
+
+  // The exception must stay NARROW. If 429/408 quietly widened into "retry every
+  // 4xx", the negative control above would be the only thing left holding the
+  // line — so assert the neighbours explicitly.
+  it('the other 4xx are still permanent: 401, 403, 404, 422', async () => {
+    for (const status of [401, 403, 404, 422]) {
+      _resetDelivery();
+      let calls = 0;
+      const f = async () => {
+        calls += 1;
+        return fail(status);
+      };
+      deliver('https://u.test/e', 'body', f as never, now as never);
+      await settle();
+      expect(calls).toBe(1);
+      expect(getLostEvents()).toBe(1);
+    }
+  });
+
   it('reads res.ok — a 500 is a FAILED delivery, not a silent success', async () => {
     // The old code only caught a THROW, so this response counted as delivered.
     let calls = 0;

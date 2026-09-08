@@ -73,13 +73,28 @@ export function _resetDelivery(): void {
 }
 
 /**
- * A 4xx is the SENDER's own mistake — a bad DSN, a malformed envelope, a
- * rejected status. Re-sending it fails identically forever and hammers a server
- * that may already be struggling. Only a network failure or a 5xx is worth
- * another attempt.
+ * Most 4xx are the SENDER's own mistake — a bad DSN, a malformed envelope, a
+ * rejected status. Re-sending one fails identically forever and hammers a server
+ * that may already be struggling.
+ *
+ * TWO 4xx ARE THE EXCEPTION, and missing them was a real bug in 0.5.0:
+ *
+ * - **429 Too Many Requests.** Upmetrics' own ingest answers 429 when a project
+ *   trips its rolling per-minute rate limit (`guardIngest` → `ingest/routes.ts`).
+ *   That is temporary BY CONSTRUCTION — the window rolls — and it fires during a
+ *   burst, which is exactly when the events matter. Treating it as permanent
+ *   dropped precisely the flood we were trying to capture.
+ * - **408 Request Timeout.** A transport-level timeout, not a bad request.
+ *
+ * Found by the Discovery reuse check rather than by a test: `@broberg/sms`
+ * 0.10.0 already classifies retryable (429, 5xx) against permanent (400/401/
+ * 403/404/422), and comparing our rule to theirs is what exposed it. The fleet
+ * has no shared retry primitive to adopt, so the classification is borrowed even
+ * though the code cannot be.
  */
 function isRetryable(status: number | null): boolean {
   if (status === null) return true; // the fetch threw: network, DNS, abort
+  if (status === 408 || status === 429) return true;
   return status >= 500;
 }
 

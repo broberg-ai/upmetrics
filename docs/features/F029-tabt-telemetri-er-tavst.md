@@ -70,6 +70,33 @@ hver eneste beslutning:
    ingenting» og «vi ved ikke om vi tabte noget».
 5. **Intet kastes nogensinde ind i værts-appen.**
 
+## Reuse
+
+Discovery-tjek 8. september 2026 (`discovery.broberg.ai/api/search?q=retry backoff
+queue delivery`):
+
+| Kapabilitet | Fandtes? | Beslutning |
+|---|---|---|
+| Generel HTTP-retry / afleveringskø | **Nej** — flåden har ingen delt transport-primitiv | **Byg lokalt.** Retry ligger indlejret i domænepakker (`@broberg/sms`, `@broberg/chat`), ikke som noget der kan importeres. |
+| Klassificering retryable vs permanent | **Ja, som MØNSTER** — `@broberg/sms` 0.10.0 | **Lånt.** Koden kan ikke genbruges (SMS-specifik), reglen kan. |
+
+**Og tjekket fandt en ægte fejl frem for at bekræfte os.** `@broberg/sms` skelner
+retryable (**429**, 5xx) fra permanent (400/401/403/404/422). Vores første udgave
+sagde `status >= 500` — altså **ingen gensendelse ved 429**.
+
+Det er ikke akademisk: **vores egen ingest svarer 429** når et projekt rammer sit
+rullende minut-loft (`guardIngest` → `ingest/routes.ts:76`). En 429 er midlertidig
+per konstruktion — vinduet ruller — og den udløses under en byge, altså præcis når
+begivenhederne betyder noget. Vi ville have kasseret netop den flod vi forsøgte at
+fange. Rettet i 0.5.1; 408 (transport-timeout) kom med af samme grund.
+
+**Værd at holde fast i:** fejlen blev fundet af genbrugs-tjekket, ikke af en prøve.
+Prøverne var grønne, fordi de afprøvede den regel jeg selv havde skrevet.
+
+**Gap meldt til `components`:** flåden mangler en delt retry/transport-primitiv.
+Cost-sinken i `@broberg/ai-sdk` har samme problem og skal rettes ét sted for alle
+— sendt til dem med målingen (#26600), ikke lappet lokalt.
+
 ## Harness
 
 Problemet med at prøve en retry er at man let kommer til at prøve **sin egen
