@@ -42,7 +42,19 @@ export function registerLensRoutes(app: Hono): void {
         const existing = await ia.findUserByEmail(LENS_EMAIL);
         const userId =
           existing?.user?.id ??
-          (await ia.createUser({ email: LENS_EMAIL, name: 'Lens (read-only)', emailVerified: true })).id;
+          (
+            await ia.createUser(
+              { email: LENS_EMAIL, name: 'Lens (read-only)', emailVerified: true },
+              // better-auth 1.7 made provenance a REQUIRED second argument: it is
+              // handed to a `validateUserInfo` gate so a provisioning hook can tell
+              // "a human signed up with a magic link" from "the system minted a
+              // service principal". We do not set that gate, so nothing reads this
+              // today — which is exactly why it must be honest now rather than
+              // whatever silences the compiler. This user is provisioned by our own
+              // endpoint for Lens, not by any sign-in flow: that is 'admin'.
+              { method: 'admin' },
+            )
+          ).id;
         const session = await ia.createSession(userId, false);
         const name = ctx.authCookies?.sessionToken?.name ?? '__Secure-better-auth.session_token';
         return {

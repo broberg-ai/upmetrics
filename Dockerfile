@@ -8,8 +8,15 @@ FROM litestream/litestream:0.3.13 AS litestream
 # ── Stage 1: build the dashboard SPA → /web/dist ────────────────────────────
 FROM oven/bun:1-slim AS web
 WORKDIR /web
-COPY apps/web/package.json ./
-RUN bun install
+# The LOCKFILE comes with the manifest, and the install is FROZEN. Without both,
+# `bun install` re-resolves every range on every build, so prod silently runs
+# dependency versions nobody tested. Measured 2026-09-15: that is how a
+# better-auth release added a required column to our login table and a later one
+# stopped filling it — the owner could not sign in, and no version we had pinned
+# had changed. A frozen install fails LOUDLY when the lockfile and manifest
+# disagree, which is the whole point.
+COPY apps/web/package.json apps/web/bun.lock ./
+RUN bun install --frozen-lockfile
 COPY apps/web/ ./
 RUN bun run build
 
@@ -18,8 +25,8 @@ FROM oven/bun:1-slim
 WORKDIR /app
 # ca-certificates so Litestream's S3 client can verify Tigris TLS (F008.1).
 RUN apt-get update && apt-get install -y --no-install-recommends ca-certificates && rm -rf /var/lib/apt/lists/*
-COPY apps/server/package.json ./
-RUN bun install
+COPY apps/server/package.json apps/server/bun.lock ./
+RUN bun install --frozen-lockfile
 COPY apps/server/ ./
 # The server serves this at /  (resolved via import.meta.dir → ../web-dist).
 COPY --from=web /web/dist ./web-dist
