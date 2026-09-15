@@ -54,6 +54,29 @@ export function registerIngestRoutes(app: Hono): void {
     }),
   );
 
+// F031.2 — every OFFICIAL Sentry client gzips the envelope by default, so the
+// body has to be decompressed before it can be parsed. Reading gzipped bytes as
+// text yields mojibake that the parser happily turns into 'unknown' items —
+// measured on prod: the same envelope gave accepted:1 raw and accepted:0
+// gzipped, both with HTTP 200.
+//
+// Narrow on purpose: gzip is what the Sentry clients send. An encoding we do not
+// handle falls through to the malformed-envelope guard below, which answers 400
+// rather than pretending.
+async function readEnvelopeBody(c: Context): Promise<string> {
+  const enc = (c.req.header('content-encoding') ?? '').toLowerCase().trim();
+  if (enc !== 'gzip') return c.req.text();
+  try {
+    const buf = new Uint8Array(await c.req.arrayBuffer());
+    return new TextDecoder().decode(Bun.gunzipSync(buf));
+  } catch {
+    // Not valid gzip despite the header. Returning the raw text lets the
+    // malformed-envelope guard answer 400 instead of throwing a 500 at a client
+    // that is merely misconfigured.
+    return '';
+  }
+}
+
 // F031 — the DSN path segment is EITHER the slug or the numeric alias.
 //
 // Sentry's own DSN parser refuses a non-integer project segment, so
@@ -87,8 +110,28 @@ function projectFromPathSegment(db: ReturnType<typeof getDb>, segment: string) {
       return c.json({ error: 'invalid_dsn' }, 401);
     }
 
-    const raw = await c.req.text();
+    const raw = await readEnvelopeBody(c);
     const env = parseEnvelope(raw);
+
+    // F031.2 — a body we could not READ must not answer 200.
+    //
+    // Every real Sentry envelope opens with a JSON object header. When it parses
+    // to a string instead, we did not understand the body at all — and until
+    // this existed that produced items of type 'unknown', which fell through the
+    // drop branch into `{"accepted":0,"dropped":N}` with HTTP 200.
+    //
+    // voice-engine measured what that costs: an official client does not read
+    // the body of a 2xx, so our only signal that nothing arrived was delivered
+    // on a channel nobody listens to. They were one read-back away from telling
+    // the fleet that Python worked while every Python service's errors vanished.
+    // A 400 fails LOUDLY, which is exactly why `BadDsn` was a cheap bug.
+    //
+    // The line is deliberately "could not READ it", not "did not store it":
+    // a valid envelope carrying sessions or transactions still answers 200 with
+    // dropped:N. We understood those and chose not to keep them.
+    if (typeof env.headers !== 'object' || env.headers === null) {
+      return c.json({ error: 'malformed_envelope', hint: 'envelope header is not JSON — is the body gzipped without Content-Encoding: gzip?' }, 400);
+    }
 
     // F007.2 — per-project rate limit + storage cap. Over-limit drops the batch
     // (one warning event emitted) and returns 429; never blocks/crashes ingest.

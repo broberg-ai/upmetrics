@@ -54,7 +54,13 @@ beforeAll(() => {
 
 let n = 0;
 function envelope(): string {
-  const id = `ev${++n}`.padEnd(32, '0');
+  // padEnd on a counter COLLIDES: 'ev1' padded to 32 with '0' is byte-identical
+  // to 'ev10' padded to 32. The route then answers accepted:1 for an event it
+  // already had (onConflictDoNothing — correct, a re-delivery is idempotent
+  // success), and the test's row-count assertion failed while nothing was wrong
+  // with the server. Found by that failure; the id is now padded on the LEFT so
+  // distinct counters stay distinct.
+  const id = `ev${String(++n).padStart(29, '0')}`;
   return (
     JSON.stringify({ event_id: id, sent_at: NOW.toISOString() }) +
     '\n' +
@@ -167,5 +173,75 @@ describe('F031 every project has an alias', () => {
     ensureDsnNumericIds(getDb());
     const after = getDb().select().from(schema.projects).where(eq(schema.projects.id, 'hand-enrolled')).get();
     expect(typeof after!.dsnNumericId).toBe('number');
+  });
+});
+
+// F031.2 — every official Sentry client gzips, and a body we cannot read must
+// not answer 200.
+//
+// Reported by voice-engine the same hour F031.1 shipped: the alias worked, and
+// it uncovered the next layer. Their point is the load-bearing one — the danger
+// is not gzip, it is the 200. An official client does not read the body of a
+// 2xx, so `accepted:0` is delivered on a channel nobody listens to.
+describe('F031.2 gzip, and a body we could not read', () => {
+  const gz = (s: string) => Bun.gzipSync(new TextEncoder().encode(s));
+
+  const postRaw = (segment: string, key: string, body: string | Uint8Array, headers: Record<string, string> = {}) =>
+    app.request(`/api/${segment}/envelope/`, {
+      method: 'POST',
+      headers: {
+        'X-Sentry-Auth': `Sentry sentry_key=${key}, sentry_version=7`,
+        'content-type': 'application/x-sentry-envelope',
+        ...headers,
+      },
+      body,
+    });
+
+  it('a GZIPPED envelope lands exactly like the uncompressed one', async () => {
+    // The SAME body in both forms, so compression is the only difference.
+    const body = envelope();
+    const before = eventsFor('alpha');
+
+    const plain = await postRaw('alpha', P.alpha.key, body);
+    expect(await plain.json()).toMatchObject({ accepted: 1, dropped: 0 });
+
+    const gzipped = await postRaw('alpha', P.alpha.key, gz(envelope()), { 'content-encoding': 'gzip' });
+    expect(gzipped.status).toBe(200);
+    expect(await gzipped.json()).toMatchObject({ accepted: 1, dropped: 0 });
+
+    expect(eventsFor('alpha')).toBe(before + 2);
+  });
+
+  it('a gzipped body sent WITHOUT the header is 400 — the shape that caused this', async () => {
+    const res = await postRaw('alpha', P.alpha.key, gz(envelope()));
+    expect(res.status).toBe(400);
+    expect(await res.json()).toMatchObject({ error: 'malformed_envelope' });
+  });
+
+  it('plain nonsense is 400', async () => {
+    const res = await postRaw('alpha', P.alpha.key, 'this is not an envelope at all');
+    expect(res.status).toBe(400);
+  });
+
+  // THE NEGATIVE CONTROL. "We could not READ it" and "we read it and it was not
+  // for us" must never collapse — otherwise we trade one silent failure for a
+  // noisy one, and sentry-sdk's sessions would start failing every send.
+  it('a VALID envelope whose items we do not store is still 200 with dropped:N', async () => {
+    const body =
+      JSON.stringify({ event_id: 'a'.repeat(32), sent_at: NOW.toISOString() }) +
+      '\n' +
+      JSON.stringify({ type: 'session' }) +
+      '\n' +
+      JSON.stringify({ sid: 'x', status: 'ok' });
+    const res = await postRaw('alpha', P.alpha.key, body);
+    expect(res.status).toBe(200);
+    expect(await res.json()).toMatchObject({ accepted: 0, dropped: 1 });
+  });
+
+  it('an uncompressed envelope with no Content-Encoding still works', async () => {
+    const before = eventsFor('alpha');
+    const res = await postRaw('alpha', P.alpha.key, envelope());
+    expect(res.status).toBe(200);
+    expect(eventsFor('alpha')).toBe(before + 1);
   });
 });
