@@ -42,6 +42,23 @@ function countWhere(table: any, where: any): number {
   return getDb().select({ n: sql<number>`count(*)` }).from(table).where(where).get()?.n ?? 0;
 }
 
+// F031 — the next free numeric DSN alias. MAX+1 rather than a count: a count
+// would re-issue a number after a project is deleted, and an old service still
+// holding that DSN would then post into someone else's project.
+function nextDsnNumericId(db: ReturnType<typeof getDb>): number {
+  const row = db.select({ m: sql<number>`coalesce(max(dsn_numeric_id), 0)` }).from(schema.projects).get();
+  return (row?.m ?? 0) + 1;
+}
+
+// The same DSN with the numeric alias in the path — the form Sentry's own
+// clients will accept. The slug form keeps working and stays the default.
+export function numericDsn(dsn: string, numericId: number | null): string | null {
+  if (numericId == null) return null;
+  const u = new URL(dsn);
+  u.pathname = `/${numericId}`;
+  return u.toString();
+}
+
 export function registerDashboardRoutes(app: Hono): void {
   // Per-project health + global matrix (F006.2).
   app.get('/api/dashboard/overview', async (c) => {
@@ -177,8 +194,18 @@ export function registerDashboardRoutes(app: Hono): void {
     const dsn = buildDsn(id);
     const apiKey = genApiKey();
     const now = new Date();
-    db.insert(schema.projects).values({ id, name, dsn, apiKey, platform, createdAt: now, updatedAt: now }).run();
-    return c.json({ project: { id, name, platform }, dsn, api_key: apiKey }, 201);
+    // F031 — assign the numeric DSN alias HERE, not only in the backfill
+    // migration. A new project created after that migration would otherwise get
+    // NULL, and the numeric DSN would silently not exist for it while the
+    // feature looked shipped — the failure this whole week has been about.
+    const dsnNumericId = nextDsnNumericId(db);
+    db.insert(schema.projects)
+      .values({ id, name, dsn, apiKey, platform, dsnNumericId, createdAt: now, updatedAt: now })
+      .run();
+    return c.json(
+      { project: { id, name, platform }, dsn, dsn_numeric: numericDsn(dsn, dsnNumericId), api_key: apiKey },
+      201,
+    );
   });
 
   // F015 — rotate a project's api_key (old key stops authenticating). Session auth.

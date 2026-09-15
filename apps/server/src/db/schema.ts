@@ -27,6 +27,19 @@ export const projects = sqliteTable('projects', {
   // an issue (distinct from `repo`, which is just the basename Buddy routes on).
   githubRepo: text('github_repo'), // e.g. "broberg-ai/upmetrics"
   remediationRelay: integer('remediation_relay', { mode: 'boolean' }).notNull().default(false),
+  // F031 — a NUMERIC alias for the DSN path, beside the slug `id`.
+  //
+  // Sentry's own DSN parser requires the project segment to be an INTEGER
+  // (`BadDsn: Invalid project in DSN`), so `sentry_sdk.init()` refuses our
+  // slug-shaped DSN before it sends anything. Measured by voice-engine
+  // 2026-09-15: our envelope CONTRACT is Sentry's; only the ADDRESS is not.
+  // With this, every Python service in the fleet uses the official, maintained
+  // client — auto-capture, ASGI integration and all — instead of copying ~25
+  // lines of raw-envelope code into each repo.
+  //
+  // A stable COLUMN, deliberately, not `rowid`: a DSN is baked into deployed
+  // services and must not change under a table rebuild.
+  dsnNumericId: integer('dsn_numeric_id'),
   // F010.5 — per-project override of the global REMEDIATION_RELAY_SEVERITY gate
   // (null → fall back to config.remediationRelaySeverity). Set self-service via
   // /api/remediation/enrollment (project key) or the dashboard settings card.

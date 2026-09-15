@@ -3,6 +3,7 @@ import { createApp } from './app';
 import { config } from './config';
 import { startCorrelationWorker } from './incidents/correlation';
 import { startRetentionWorker } from './ops/retention';
+import { getDb, ensureDsnNumericIds } from './db';
 import { startDiskGuardWorker } from './ops/diskguard';
 import { startFxWorker } from './fx/rate';
 import { startLagGauge } from './ops/lag-gauge';
@@ -19,6 +20,9 @@ startCorrelationWorker();
 
 // F007.1: daily retention + compaction (events purge, agent_runs, probe downsample).
 startRetentionWorker();
+// F031 — assign a numeric DSN alias to any project that still lacks one (a
+// hand-enrolled repo never passes the route that hands them out).
+ensureDsnNumericIds(getDb());
 
 // F025.1/.3: watch /data headroom and cap the WAL. Runs once at boot, then on
 // interval — the 2026-07-30 outage was a disk that filled with nothing watching.

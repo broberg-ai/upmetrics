@@ -54,11 +54,32 @@ export function registerIngestRoutes(app: Hono): void {
     }),
   );
 
+// F031 — the DSN path segment is EITHER the slug or the numeric alias.
+//
+// Sentry's own DSN parser refuses a non-integer project segment, so
+// `sentry_sdk.init()` throws `BadDsn` before it sends anything. The numeric
+// alias is what lets every Python service in the fleet use the official,
+// maintained client instead of copying raw-envelope code into each repo.
+//
+// THE SLUG IS TRIED FIRST, and that order is the guard, not a preference: a
+// project whose slug happens to be numeric must always reach ITS OWN project and
+// can never be captured by whichever project holds that number as an alias.
+// Getting this backwards would land one repo's errors on another repo's board —
+// the exact damage helpdesk measured from the other side the same day.
+function projectFromPathSegment(db: ReturnType<typeof getDb>, segment: string) {
+  const bySlug = db.select().from(schema.projects).where(eq(schema.projects.id, segment)).get();
+  if (bySlug) return bySlug;
+  if (!/^\d+$/.test(segment)) return null;
+  const n = Number(segment);
+  if (!Number.isSafeInteger(n)) return null;
+  return db.select().from(schema.projects).where(eq(schema.projects.dsnNumericId, n)).get() ?? null;
+}
+
   app.post('/api/:projectId/envelope/', async (c) => {
     const projectId = c.req.param('projectId');
     const db = getDb();
 
-    const project = db.select().from(schema.projects).where(eq(schema.projects.id, projectId)).get();
+    const project = projectFromPathSegment(db, projectId);
     if (!project) return c.json({ error: 'unknown_project' }, 404);
 
     const key = sentryKey(c);
