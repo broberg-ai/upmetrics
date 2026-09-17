@@ -23,7 +23,7 @@
     "@upmetrics/sdk": "^0.7.0",
     "better-auth": "1.7.5",
     "drizzle-orm": "^0.45.2",
-    "hono": "^4.12.23",
+    "hono": "^4.12.34",
     "jose": "6.2.12",
     "kysely": "0.28.17",
     "zod": "^4.0.0"

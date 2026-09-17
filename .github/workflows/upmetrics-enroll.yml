@@ -111,7 +111,15 @@ jobs:
           fi
           curl -sSL https://fly.io/install.sh | sh
           export PATH="$HOME/.fly/bin:$PATH"
-          flyctl secrets set --app "$FLY_APP" --stage \
+          # NO --stage. Measured by components on broberg-id, 2026-09-17: a
+          # staged secret shows as "Deployed" in `flyctl secrets list` and is
+          # ABSENT from the machine's env — neither `flyctl deploy` nor
+          # `flyctl secrets deploy` moved it in. 11 of 13 secrets set without
+          # --stage were present; the two set with it were not. So the secret
+          # arrives, the status word says it arrived, and the process never sees
+          # it: a false green that reads as a broken SDK rather than a missing
+          # value. The restart it causes is the price of the secret being real.
+          flyctl secrets set --app "$FLY_APP" \
             UPMETRICS_DSN='${{ steps.enroll.outputs.dsn }}' \
             UPMETRICS_API_KEY='${{ steps.enroll.outputs.api_key }}'
-          echo "Staged on $FLY_APP — they take effect on the next deploy."
+          echo "Set on $FLY_APP — the machine restarts on them."
