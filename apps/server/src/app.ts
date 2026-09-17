@@ -16,6 +16,7 @@ import { registerDeployRelayRoutes } from './deploys/relay';
 import { registerLensRoutes } from './auth/lens';
 import { registerCreditRoutes } from './credits/routes';
 import { registerFxRoutes } from './fx/routes';
+import { registerEnrollRoutes } from './enroll/routes';
 import { captureSelf } from './dogfood';
 import { eventLoopLagMs } from './ops/lag-gauge';
 import { lastDiskUsage, bandFor } from './ops/diskguard';
@@ -41,6 +42,7 @@ export function createApp() {
   registerLensRoutes(app); // F016 — Lens mint-endpoint (read-only visual-verification session)
   registerCreditRoutes(app); // F022 — provider credit-snapshot ingest + export-API
   registerFxRoutes(app); // F023 — public live USD→DKK rate
+  registerEnrollRoutes(app); // F032 — self-enrollment (a repo's own GitHub CI proves who it is)
 
   // Liveness (Fly health check). Pure: 200 whenever the process can answer at
   // all. It must NEVER 503 for mere pressure — a 503 here makes Fly pull our

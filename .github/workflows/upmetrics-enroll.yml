@@ -1,0 +1,117 @@
+name: upmetrics-enroll
+
+# Enrols THIS repo in Upmetrics — error tracking, incidents, cost telemetry.
+#
+# COPY THIS FILE INTO ANY broberg-ai REPO AS-IS. There is nothing to fill in and
+# no secret to obtain: GitHub signs a short-lived token that says which repo this
+# is, and Upmetrics verifies that signature. The repo name comes out of GitHub's
+# signature, so no other repo can claim yours.
+#
+# What you get back: your project's DSN (public, safe to print) and your `uk_`
+# api-key (secret — the key that lets this repo close its OWN errors).
+#
+# Re-running is safe and returns the SAME credentials. That is deliberate, and it
+# is also the better way to use this: instead of STORING the api-key anywhere,
+# your deploy workflow can fetch it at deploy time with the same three steps
+# below. A credential that is minted on demand cannot leak from a store that does
+# not exist.
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    # Runs once, when this file first lands. Not on every push — an enrolment per
+    # commit is noise, and enrolment does not change between commits.
+    paths: ['.github/workflows/upmetrics-enroll.yml']
+
+jobs:
+  enroll:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write # lets GitHub mint the token that proves which repo this is
+    steps:
+      - name: Enrol in Upmetrics
+        id: enroll
+        env:
+          # The audience BINDS the token to Upmetrics. Without it, a token minted
+          # for something else (npm's Trusted Publishing mints these too) could be
+          # replayed here — so Upmetrics rejects any token not addressed to it.
+          UPMETRICS_URL: https://upmetrics.org
+        run: |
+          set -euo pipefail
+
+          # 1. Ask GitHub for a signed token addressed to Upmetrics.
+          TOKEN=$(curl -sS -H "Authorization: bearer $ACTIONS_ID_TOKEN_REQUEST_TOKEN" \
+            "$ACTIONS_ID_TOKEN_REQUEST_URL&audience=$UPMETRICS_URL" | jq -r '.value')
+          if [ -z "$TOKEN" ] || [ "$TOKEN" = "null" ]; then
+            echo "::error::GitHub did not mint an OIDC token — is 'id-token: write' set on this job?"
+            exit 1
+          fi
+
+          # 2. Hand it over. Nothing else is sent; the project name is read out of
+          #    the token, never out of this request.
+          BODY=$(curl -sS -w '\n%{http_code}' -X POST "$UPMETRICS_URL/api/enroll" \
+            -H "Authorization: Bearer $TOKEN" \
+            -H 'content-type: application/json' \
+            -d '{"platform":"node"}')
+          CODE=$(echo "$BODY" | tail -n1)
+          JSON=$(echo "$BODY" | sed '$d')
+
+          if [ "$CODE" != "200" ] && [ "$CODE" != "201" ]; then
+            echo "::error::Upmetrics refused the enrolment (HTTP $CODE): $(echo "$JSON" | jq -c '{error,reason,message}')"
+            exit 1
+          fi
+
+          # 3. MASK THE KEY BEFORE IT IS USED ANYWHERE. Every later line that
+          #    contains it is replaced with *** in the log, including an accidental
+          #    `set -x` or a curl error. Masking after first use is too late.
+          API_KEY=$(echo "$JSON" | jq -r '.api_key')
+          echo "::add-mask::$API_KEY"
+          DSN=$(echo "$JSON" | jq -r '.dsn')
+          DSN_NUMERIC=$(echo "$JSON" | jq -r '.dsn_numeric')
+          PROJECT=$(echo "$JSON" | jq -r '.project.id')
+
+          echo "dsn=$DSN"                 >> "$GITHUB_OUTPUT"
+          echo "dsn_numeric=$DSN_NUMERIC" >> "$GITHUB_OUTPUT"
+          echo "project=$PROJECT"         >> "$GITHUB_OUTPUT"
+          echo "api_key=$API_KEY"         >> "$GITHUB_OUTPUT"
+
+          {
+            echo "### Enrolled in Upmetrics"
+            echo ""
+            echo "| | |"
+            echo "|---|---|"
+            echo "| project | \`$PROJECT\` |"
+            echo "| created now | $(echo "$JSON" | jq -r '.created') |"
+            echo "| DSN | \`$DSN\` |"
+            echo "| DSN (numeric — for Python's sentry-sdk) | \`$DSN_NUMERIC\` |"
+            echo ""
+            echo "The \`uk_\` api-key is masked and never printed. Fetch it at deploy"
+            echo "time with these same steps instead of storing it."
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      # Puts the credentials where the running service reads them. Skipped
+      # entirely when the repo has no FLY_API_TOKEN — the enrolment above still
+      # succeeded, and the project exists either way.
+      - name: Put credentials into Fly secrets
+        if: ${{ vars.FLY_APP != '' }}
+        env:
+          FLY_APP: ${{ vars.FLY_APP }}
+          FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN }}
+        run: |
+          set -euo pipefail
+          # Checked HERE, not in the `if:`. Whether the `secrets` context can be
+          # read from a step-level `if` is exactly the kind of thing that fails
+          # silently by skipping the step — and a skipped step looks identical to
+          # a step that had nothing to do.
+          if [ -z "${FLY_API_TOKEN:-}" ]; then
+            echo "::notice::No FLY_API_TOKEN in this repo — enrolment succeeded, credentials not staged."
+            exit 0
+          fi
+          curl -sSL https://fly.io/install.sh | sh
+          export PATH="$HOME/.fly/bin:$PATH"
+          flyctl secrets set --app "$FLY_APP" --stage \
+            UPMETRICS_DSN='${{ steps.enroll.outputs.dsn }}' \
+            UPMETRICS_API_KEY='${{ steps.enroll.outputs.api_key }}'
+          echo "Staged on $FLY_APP — they take effect on the next deploy."

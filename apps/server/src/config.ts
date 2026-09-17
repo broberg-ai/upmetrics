@@ -28,6 +28,23 @@ export const config = {
     .split(',')
     .map((s) => s.trim())
     .filter(Boolean),
+  // F032 — self-enrollment via GitHub Actions OIDC. A repo's own CI proves who
+  // it is; we never hand out (or hold) a shared enrollment key.
+  //
+  // The ORG FENCE. A GitHub OIDC token is perfectly valid for ANY repository on
+  // GitHub, so the signature alone says "some repo somewhere", not "one of
+  // ours". This list is what turns an authentic identity into an authorised
+  // one. Comma-separated, env-overridable — one source, no org name hardcoded
+  // in a route.
+  enrollAllowedOwners: (process.env.ENROLL_ALLOWED_OWNERS ?? 'broberg-ai')
+    .split(',')
+    .map((s) => s.trim().toLowerCase())
+    .filter(Boolean),
+  // The audience a token must carry to be accepted HERE. Derived from
+  // authBaseUrl, so it cannot drift from the host in our DSNs. This is the
+  // claim that stops a token minted for something else — our own npm Trusted
+  // Publishing workflow mints OIDC tokens too — from being replayed at us.
+  enrollAudience: process.env.ENROLL_AUDIENCE ?? (process.env.AUTH_BASE_URL ?? 'http://localhost:3017'),
   // Probes (F004): cronjobs.webhouse.net is the scheduler/trigger.
   cronjobsApiBase: process.env.CRONJOBS_API_BASE ?? 'https://cronjobs.webhouse.net',
   cronjobsApiToken: process.env.CRONJOBS_API_TOKEN ?? '',

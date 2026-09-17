@@ -44,6 +44,13 @@ export const projects = sqliteTable('projects', {
   // (null → fall back to config.remediationRelaySeverity). Set self-service via
   // /api/remediation/enrollment (project key) or the dashboard settings card.
   remediationRelaySeverity: text('remediation_relay_severity'), // null | low | medium | high | critical
+  // F032 — which GitHub repo owns this project, asserted by GitHub's own OIDC
+  // token rather than claimed by the caller. The ID is the binding, not the
+  // name: `repository_id` survives a rename, and a deleted-and-recreated repo
+  // gets a NEW id, so it cannot silently inherit the old project's key.
+  enrollRepository: text('enroll_repository'), // "broberg-ai/voice-engine"
+  enrollRepositoryId: integer('enroll_repository_id').unique(),
+  enrolledAt: integer('enrolled_at', { mode: 'timestamp_ms' }),
   createdAt: integer('created_at', { mode: 'timestamp_ms' }).notNull(),
   updatedAt: integer('updated_at', { mode: 'timestamp_ms' }).notNull(),
 });
@@ -363,4 +370,34 @@ export const maintenanceWindows = sqliteTable(
     createdAt: integer('created_at', { mode: 'timestamp_ms' }).notNull(),
   },
   (t) => [index('maintenance_window_idx').on(t.startsAt, t.endsAt)],
+);
+
+// ── enroll_attempts (F032) — the audit trail for self-enrollment ─────────────
+// EVERY attempt lands here, including the denied ones — a denial is where an
+// attack becomes visible, so writing only the successes would make the audit
+// anti-correlated with the thing it exists to catch. Never holds the token or
+// the issued api_key.
+//
+// `jti` doubles as the replay guard: GitHub puts a unique id in every OIDC
+// token, the unique index makes a second use of the same token a constraint
+// violation, and a token that leaks into a CI log is then spent rather than
+// replayable until it expires.
+export const enrollAttempts = sqliteTable(
+  'enroll_attempts',
+  {
+    id: text('id').primaryKey(),
+    at: integer('at', { mode: 'timestamp_ms' }).notNull(),
+    jti: text('jti').unique(), // null when the token never verified — we do not trust its claims
+    repository: text('repository'), // "broberg-ai/voice-engine"
+    repositoryId: integer('repository_id'),
+    owner: text('owner'),
+    ref: text('ref'),
+    sha: text('sha'),
+    runId: text('run_id'),
+    workflow: text('workflow'),
+    outcome: text('outcome').notNull(), // created | enrolled | denied
+    reason: text('reason'), // invalid_token | token_replayed | owner_not_allowed | slug_taken | …
+    projectId: text('project_id'),
+  },
+  (t) => [index('enroll_attempts_at_idx').on(t.at), index('enroll_attempts_repo_idx').on(t.repositoryId, t.at)],
 );

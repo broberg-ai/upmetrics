@@ -45,7 +45,7 @@ function countWhere(table: any, where: any): number {
 // F031 — the next free numeric DSN alias. MAX+1 rather than a count: a count
 // would re-issue a number after a project is deleted, and an old service still
 // holding that DSN would then post into someone else's project.
-function nextDsnNumericId(db: ReturnType<typeof getDb>): number {
+export function nextDsnNumericId(db: ReturnType<typeof getDb>): number {
   const row = db.select({ m: sql<number>`coalesce(max(dsn_numeric_id), 0)` }).from(schema.projects).get();
   return (row?.m ?? 0) + 1;
 }
@@ -178,7 +178,28 @@ export function registerDashboardRoutes(app: Hono): void {
       components,
       remediation: enrollmentView(project), // F010.5 — current enrollment for the settings card
       credentials: { dsn: project.dsn, api_key: project.apiKey }, // F015 — session-authed reveal
+      // F032 — which GitHub repo self-enrolled this project, if any. null means
+      // it was created by hand, so nobody can answer "who asked for this" later.
+      enrollment: project.enrollRepository
+        ? { repository: project.enrollRepository, repository_id: project.enrollRepositoryId, enrolled_at: project.enrolledAt }
+        : null,
     });
+  });
+
+  // F032 — the self-enrollment audit trail, newest first. Every attempt is here,
+  // including the denied ones: a denial is where an attack becomes visible, so a
+  // view that showed only the successes would hide exactly what it exists for.
+  app.get('/api/dashboard/enrollments', async (c) => {
+    if (!(await requireUser(c))) return c.json({ error: 'unauthorized' }, 401);
+    const db = getDb();
+    const attempts = db.select().from(schema.enrollAttempts).orderBy(desc(schema.enrollAttempts.at)).limit(100).all();
+    const enrolled = db
+      .select()
+      .from(schema.projects)
+      .where(isNotNull(schema.projects.enrollRepositoryId))
+      .all()
+      .map((p) => ({ project: p.id, repository: p.enrollRepository, repository_id: p.enrollRepositoryId, enrolled_at: p.enrolledAt }));
+    return c.json({ enrolled, attempts });
   });
 
   // F015 — create a new project ("customer"): generates DSN + api_key. Session auth.
