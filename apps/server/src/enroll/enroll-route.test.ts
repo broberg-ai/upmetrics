@@ -159,6 +159,13 @@ describe('F032.1 a repo enrolls itself', () => {
     // The "I lost my .env" recovery: the repo gets its EXISTING credentials.
     expect(body.api_key).toBe('uk_existing_key_from_before');
     expect(projectRow('helpdesk')!.enrollRepositoryId).toBe(202);
+    // The fixture above has NO numeric alias — a project hand-inserted since the
+    // last boot never passed ensureDsnNumericIds. Without filling it here the
+    // response carries dsn_numeric: null, and a workflow writes that out as the
+    // literal string "null": a value that reads like a DSN and is not one.
+    expect(body.dsn_numeric).not.toBeNull();
+    expect(body.dsn_numeric).toMatch(/\/\d+$/);
+    expect(typeof projectRow('helpdesk')!.dsnNumericId).toBe('number');
   });
 });
 

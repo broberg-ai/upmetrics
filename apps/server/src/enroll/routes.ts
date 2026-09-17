@@ -51,8 +51,18 @@ function noteFailure(ip: string, now: number): void {
   b.n += 1;
 }
 
+function isUniqueViolation(err: unknown): boolean {
+  const e = err as { code?: string; message?: string };
+  return e?.code === 'SQLITE_CONSTRAINT_UNIQUE' || /UNIQUE constraint failed/i.test(e?.message ?? '');
+}
+
 function clientIp(c: Context): string {
-  return c.req.header('fly-client-ip') ?? c.req.header('x-forwarded-for')?.split(',')[0]?.trim() ?? 'unknown';
+  // `fly-client-ip` ONLY. x-forwarded-for is caller-supplied, so using it as a
+  // rate-limit key lets the caller pick its own bucket and rotate out of the
+  // limit at will — a budget an attacker controls is not a budget. Everything
+  // without the Fly header shares one bucket, which is safe here because only
+  // FAILED verifications spend it: a real GitHub token is never throttled.
+  return c.req.header('fly-client-ip') ?? 'unknown';
 }
 
 type AttemptFields = {
@@ -152,7 +162,12 @@ export function registerEnrollRoutes(app: Hono, opts: EnrollOptions = {}): void 
     let attemptId: string;
     try {
       attemptId = audit({ jti: claims.jti, claims, outcome: 'denied', reason: 'in_progress' });
-    } catch {
+    } catch (err) {
+      // ONLY a unique-constraint failure means "this token was already spent".
+      // Catching everything would report a disk-full or a schema fault as a
+      // replay — a wrong answer that looks like a security decision, which is
+      // the worst way for this particular line to be wrong.
+      if (!isUniqueViolation(err)) throw err;
       audit({ claims, outcome: 'denied', reason: 'token_replayed' });
       return c.json({ error: 'token_replayed' }, 401);
     }
@@ -202,9 +217,16 @@ export function registerEnrollRoutes(app: Hono, opts: EnrollOptions = {}): void 
       // this safe: a repo name is unique inside a GitHub org, so `<org>/X` maps
       // one-to-one onto project X, and claiming one needs write access to the
       // org itself.
-      const bound = { ...bySlug, enrollRepository: claims.repository, enrollRepositoryId: claims.repositoryId };
+      // A project hand-inserted since the last boot never passed
+      // ensureDsnNumericIds, so it can still be missing its numeric alias — and
+      // then the response hands back dsn_numeric: null, which a workflow writes
+      // out as the literal string "null". Fill it here rather than leave the
+      // caller a value that reads as a DSN and is not one.
+      const dsnNumericId = bySlug.dsnNumericId ?? nextDsnNumericId(db);
+      const bound = { ...bySlug, dsnNumericId, enrollRepository: claims.repository, enrollRepositoryId: claims.repositoryId };
       db.update(schema.projects)
         .set({
+          dsnNumericId,
           enrollRepository: claims.repository,
           enrollRepositoryId: claims.repositoryId,
           enrolledAt: new Date(),
