@@ -8,6 +8,7 @@ import { auth } from '../auth';
 import { LENS_EMAIL } from '../auth/lens';
 import { deleteProbeJob, setProbeJobEnabled, updateProbeJob } from '../probes/cronjobs';
 import { dispatchRemediation } from '../incidents/remediation';
+import { ensureDefaultAlertRules } from '../incidents/alert-rules';
 import { pendingRemediations, enrollmentView, buildEnrollmentPatch, applyEnrollment } from '../incidents/relay';
 import { costSummary } from '../cost/routes';
 import { fetchWorkflowRuns, ciTargets } from '../ci/github';
@@ -223,6 +224,9 @@ export function registerDashboardRoutes(app: Hono): void {
     db.insert(schema.projects)
       .values({ id, name, dsn, apiKey, platform, dsnNumericId, createdAt: now, updatedAt: now })
       .run();
+    // F033.1 — same reason as the enrolment route: a project created here must
+    // have somewhere to ring from the second it exists, not from the next boot.
+    ensureDefaultAlertRules(db);
     return c.json(
       { project: { id, name, platform }, dsn, dsn_numeric: numericDsn(dsn, dsnNumericId), api_key: apiKey },
       201,

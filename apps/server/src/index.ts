@@ -5,6 +5,7 @@ import { startCorrelationWorker } from './incidents/correlation';
 import { startRetentionWorker } from './ops/retention';
 import { getDb, ensureDsnNumericIds } from './db';
 import { startDiskGuardWorker } from './ops/diskguard';
+import { ensureDefaultAlertRules } from './incidents/alert-rules';
 import { startFxWorker } from './fx/rate';
 import { startLagGauge } from './ops/lag-gauge';
 import { initDogfood } from './dogfood';
@@ -23,6 +24,10 @@ startRetentionWorker();
 // F031 — assign a numeric DSN alias to any project that still lacks one (a
 // hand-enrolled repo never passes the route that hands them out).
 ensureDsnNumericIds(getDb());
+// F033.1 — give every project without any alert rule the default one. Same
+// reason this runs at boot rather than as a migration: a hand-enrolled project
+// never passes either creation route, and a migration runs once.
+ensureDefaultAlertRules(getDb());
 
 // F025.1/.3: watch /data headroom and cap the WAL. Runs once at boot, then on
 // interval — the 2026-07-30 outage was a disk that filled with nothing watching.

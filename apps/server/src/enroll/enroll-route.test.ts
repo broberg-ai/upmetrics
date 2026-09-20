@@ -117,6 +117,17 @@ describe('F032.1 a repo enrolls itself', () => {
     expect(row.apiKey).toBe(body.api_key);
   });
 
+  // F033.1 — a repo that enrols itself gets a DSN, a key and monitoring. Until
+  // this it also got silence: no alert_rules row, so an incident raised on it
+  // reached nobody. Read the rule back from the database, not from the response.
+  it('the new project can RING — an enabled alert rule exists the moment it is enrolled', () => {
+    const rules = getDb().select().from(schema.alertRules).where(eq(schema.alertRules.projectId, 'voice-engine')).all();
+    expect(rules.length).toBe(1);
+    expect(rules[0]!.kind).toBe('*');
+    expect(rules[0]!.enabled).toBe(true);
+    expect(rules[0]!.channels).toEqual(['email', 'discord']);
+  });
+
   it('re-running the workflow is idempotent — SAME dsn, SAME key, no second project', async () => {
     const before = projectCount();
     const first = projectRow('voice-engine')!;

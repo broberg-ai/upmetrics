@@ -127,6 +127,11 @@ export const config = {
   // when one is open, downstream per-site alerts are suppressed for the window.
   fleetOutageKinds: (process.env.FLEET_OUTAGE_KINDS ?? 'region_down,upmetrics_down').split(',').filter(Boolean),
   fleetAlertDiscordWebhook: process.env.FLEET_ALERT_DISCORD_WEBHOOK ?? '', // roll-up + digest target
+  // F033.1 — the email counterpart of the fleet webhook above. No project has its
+  // own alert_email (measured on production: zero of 24), so without one address
+  // in ONE place the email channel can never fire. Unset → the email leg records
+  // "email channel not configured" and Discord still delivers (ships dark).
+  fleetAlertEmail: process.env.FLEET_ALERT_EMAIL ?? '',
   alertRateCapacity: coerceInt('ALERT_RATE_CAPACITY', 10), // global token bucket per window
   alertDigestIntervalMs: coerceInt('ALERT_DIGEST_INTERVAL_MS', 600_000), // 10 min min between digests
   // F025 — disk-guard + WAL safety valve. Born from the 2026-07-30→08-02 outage:

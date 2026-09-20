@@ -129,8 +129,12 @@ async function deliver(
   for (const ch of channels) {
     try {
       if (ch === 'email') {
-        if (!config.resendApiKey || !project.alertEmail) throw new Error('email channel not configured');
-        await sendEmail(project.alertEmail, subject, incident, project);
+        // Per-project address wins; otherwise the single fleet address, mirroring
+        // the Discord fallback below so the recipient has one source, not a copy
+        // per project (F033.1).
+        const to = project.alertEmail || config.fleetAlertEmail;
+        if (!config.resendApiKey || !to) throw new Error('email channel not configured');
+        await sendEmail(to, subject, incident, project);
       } else if (ch === 'discord') {
         // Per-project webhook wins; otherwise fall back to the single fleet
         // webhook (FLEET_ALERT_DISCORD_WEBHOOK) so the URL has one source, not

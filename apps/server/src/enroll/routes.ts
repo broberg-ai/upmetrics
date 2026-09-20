@@ -18,6 +18,7 @@ import type { JWTVerifyGetKey } from 'jose';
 import { eq } from 'drizzle-orm';
 import { randomUUID } from 'node:crypto';
 import { getDb, schema } from '../db';
+import { ensureDefaultAlertRules } from '../incidents/alert-rules';
 import { config } from '../config';
 import { verifyGithubOidc, slugFromRepository, ownerAllowed, type GithubClaims } from './oidc';
 import { genApiKey, buildDsn, numericDsn, nextDsnNumericId, SLUG_RE } from '../dashboard/routes';
@@ -259,6 +260,10 @@ export function registerEnrollRoutes(app: Hono, opts: EnrollOptions = {}): void 
       updatedAt: at,
     };
     db.insert(schema.projects).values(row).run();
+    // F033.1 — a repo that enrols itself must be able to RING. Without this the
+    // project gets a DSN, a key and monitoring, and silently no alarm until the
+    // next boot sweep.
+    ensureDefaultAlertRules(db);
     setOutcome(attemptId, 'created', null, slug);
     return c.json(credentials(db.select().from(schema.projects).where(eq(schema.projects.id, slug)).get()!, true), 201);
   });
