@@ -9,6 +9,7 @@ import { LENS_EMAIL } from '../auth/lens';
 import { deleteProbeJob, setProbeJobEnabled, updateProbeJob } from '../probes/cronjobs';
 import { dispatchRemediation } from '../incidents/remediation';
 import { ensureDefaultAlertRules } from '../incidents/alert-rules';
+import { coverageByProject } from '../incidents/coverage-guard';
 import { pendingRemediations, enrollmentView, buildEnrollmentPatch, applyEnrollment } from '../incidents/relay';
 import { costSummary } from '../cost/routes';
 import { fetchWorkflowRuns, ciTargets } from '../ci/github';
@@ -68,6 +69,10 @@ export function registerDashboardRoutes(app: Hono): void {
     const today = startOfToday();
 
     const projects = db.select().from(schema.projects).all();
+    // F033.2 — one query for the whole fleet, not one per project: whether each
+    // project has an enabled alert rule at all. A project that cannot ring is
+    // the state this surface exists to make visible.
+    const coverage = coverageByProject(db);
     const rows = projects.map((p) => {
       const probes = db.select({ status: schema.probes.status }).from(schema.probes).where(eq(schema.probes.projectId, p.id)).all();
       const total = probes.length;
@@ -103,6 +108,7 @@ export function registerDashboardRoutes(app: Hono): void {
         open_incidents: openIncidents,
         agent_cost_today: Number(agentCostToday),
         agent_cost_total: Number(agentCostTotal),
+        alerts_covered: coverage[p.id] ?? false,
         status,
       };
     });
@@ -111,6 +117,7 @@ export function registerDashboardRoutes(app: Hono): void {
       projects: rows,
       totals: {
         projects: rows.length,
+        alerts_uncovered: rows.filter((r) => !r.alerts_covered).length,
         open_issues: rows.reduce((a, r) => a + r.open_issues, 0),
         open_incidents: rows.reduce((a, r) => a + r.open_incidents, 0),
         agent_cost_today: rows.reduce((a, r) => a + r.agent_cost_today, 0),

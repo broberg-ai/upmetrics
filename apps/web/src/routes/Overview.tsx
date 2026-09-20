@@ -1,5 +1,5 @@
 import { useState } from 'preact/hooks';
-import { Plus } from 'lucide-preact';
+import { Plus, BellOff } from 'lucide-preact';
 import { useApi } from '../lib/useApi';
 import { api } from '../lib/api';
 import { usd, dkk } from '../lib/format';
@@ -113,11 +113,13 @@ interface Proj {
   open_incidents: number;
   agent_cost_today: number;
   agent_cost_total: number;
+  // F033.2 — false means this project can raise an incident that reaches nobody.
+  alerts_covered: boolean;
   status: 'ok' | 'degraded' | 'down';
 }
 interface OverviewData {
   projects: Proj[];
-  totals: { projects: number; open_issues: number; open_incidents: number; agent_cost_today: number; agent_cost_total: number };
+  totals: { projects: number; alerts_uncovered: number; open_issues: number; open_incidents: number; agent_cost_today: number; agent_cost_total: number };
 }
 
 const TONE = { ok: 'ok', degraded: 'warn', down: 'down' } as const;
@@ -185,7 +187,14 @@ export function Overview() {
                       <StatusDot tone={TONE[p.status]} />
                       <span class="font-medium">{p.name}</span>
                     </div>
-                    <Badge tone="muted">{p.platform}</Badge>
+                    <div class="flex items-center gap-2">
+                      {!p.alerts_covered && (
+                        <Badge tone="warn" data-testid={`overview-no-alert-rule-${p.id}`}>
+                          <BellOff size={12} /> No alarm
+                        </Badge>
+                      )}
+                      <Badge tone="muted">{p.platform}</Badge>
+                    </div>
                   </div>
                   <div class="grid grid-cols-3 gap-3">
                     <Metric label={`Probes up (${p.probe_total})`} value={p.probe_up_pct === null ? '—' : `${p.probe_up_pct}%`} tone={p.probe_up_pct !== null && p.probe_up_pct < 100 ? 'down' : undefined} />
@@ -223,6 +232,11 @@ export function Overview() {
                     </td>
                     <td class="py-2">
                       <Badge tone={TONE[p.status]}>{STATUS_LABEL[p.status]}</Badge>
+                      {!p.alerts_covered && (
+                        <Badge tone="warn" class="ml-2" data-testid={`matrix-no-alert-rule-${p.id}`}>
+                          <BellOff size={12} /> No alarm
+                        </Badge>
+                      )}
                     </td>
                     <td class="py-2">{p.probe_up_pct === null ? '—' : `${p.probe_up_pct}%`}</td>
                     <td class="py-2">{p.open_issues}</td>

@@ -13,6 +13,7 @@ import { and, eq, gte, inArray, sql } from 'drizzle-orm';
 import { getDb, schema } from '../db';
 import { config } from '../config';
 import { runAlertsStorm } from './storm';
+import { runCoverageGuard } from './coverage-guard';
 import { runRemediation } from './remediation';
 import { pushPendingToCardmem } from './cardmem-push';
 import { escalateUnclaimed } from './escalation';
@@ -213,6 +214,7 @@ export function startCorrelationWorker(): void {
       evaluateDeployRegressions(db); // F019.9 — post-deploy health verdict + deploy_regression incidents (sync)
       void pushDeployRelays(db).catch((err) => console.error('[deploy-relay] push tick failed:', err)); // F019.11 — push deploy-complete intercom to originator
       void runAlertsStorm(db).catch((err) => console.error('[alerts] tick failed:', err)); // F005.2 + F008.3 storm-control
+      void runCoverageGuard(db).catch((err) => console.error('[coverage-guard] tick failed:', err)); // F033.2 — a project with no enabled alert rule is itself an alarm
       void runRemediation(db).catch((err) => console.error('[remediation] tick failed:', err)); // F005.3 — dispatch
       void pushPendingToCardmem(db).catch((err) => console.error('[cardmem-push] tick failed:', err)); // F005.4 — Inbox cards
       void escalateUnclaimed(db).catch((err) => console.error('[escalation] tick failed:', err)); // F010.5 — alert remediations no session claimed

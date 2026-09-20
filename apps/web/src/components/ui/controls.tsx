@@ -48,9 +48,9 @@ export function Spinner({ size = 18 }: { size?: number }) {
 type Tone = 'ok' | 'warn' | 'down' | 'muted' | 'primary';
 const TONE_VAR: Record<Tone, string> = { ok: 'var(--ok)', warn: 'var(--warn)', down: 'var(--down)', muted: 'var(--muted)', primary: 'var(--primary)' };
 
-export function Badge({ tone = 'muted', children }: { tone?: Tone; children: ComponentChildren }) {
+export function Badge({ tone = 'muted', children, class: cls = '', 'data-testid': testId }: { tone?: Tone; children: ComponentChildren; class?: string; 'data-testid'?: string }) {
   return (
-    <span class="inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-xs font-medium" style={{ color: TONE_VAR[tone], background: 'color-mix(in srgb, ' + TONE_VAR[tone] + ' 14%, transparent)' }}>
+    <span data-testid={testId} class={`inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-xs font-medium ${cls}`} style={{ color: TONE_VAR[tone], background: 'color-mix(in srgb, ' + TONE_VAR[tone] + ' 14%, transparent)' }}>
       {children}
     </span>
   );
