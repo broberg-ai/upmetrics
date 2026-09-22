@@ -74,6 +74,16 @@ export async function runAlerts(db: Db, now: Date = new Date(), control?: AlertC
 
     for (const rule of rules) {
       if (!ruleMatches(rule, incident)) continue;
+      // F034 — en regel hvis eneste kanal var email har nu ingen kanaler tilbage.
+      // Den må ikke tælle som «fired» og må ikke skrive en alert_history-række:
+      // rækken er dedup-lageret, så en levering der aldrig skete ville lukke
+      // munden på den ægte alarm en time frem. Ingen er ramt i dag (alle 24
+      // projekter har også discord), men forskellen mellem «sendt» og «sendt
+      // ingen steder» må ikke stå og ligne hinanden i revisionssporet.
+      if (effectiveChannels(rule).length === 0) {
+        r.suppressed++;
+        continue;
+      }
       if (isDeduped(db, rule, incident, now)) {
         r.deduped++;
         continue;
@@ -99,6 +109,16 @@ export async function runAlerts(db: Db, now: Date = new Date(), control?: AlertC
     }
   }
   return r;
+}
+
+// F034 — mail er slukket med mindre ALERT_EMAIL_ENABLED=true. Frafiltreret FØR
+// forsøget, ikke fanget som en fejl bagefter: et fejlet forsøg ville skrive en
+// errors-linje i alert_history for hver eneste alarm, og så kunne man ikke se
+// forskel på «slukket med vilje» og «Resend er nede».
+export function effectiveChannels(rule: AlertRule): string[] {
+  return ((Array.isArray(rule.channels) ? rule.channels : []) as string[]).filter(
+    (ch) => ch !== 'email' || config.alertEmailEnabled,
+  );
 }
 
 function ruleMatches(rule: AlertRule, incident: Incident): boolean {
@@ -130,13 +150,7 @@ async function deliver(
   incident: Incident,
   project: Project,
 ): Promise<{ channelsSent: string[]; errors: string[] }> {
-  // F034 — mail er slukket med mindre ALERT_EMAIL_ENABLED=true. Frafiltreret FØR
-  // forsøget, ikke fanget som en fejl bagefter: et fejlet forsøg ville skrive en
-  // errors-linje i alert_history for hver eneste alarm, og så kan man ikke se
-  // forskel på «slukket med vilje» og «Resend er nede».
-  const channels = ((Array.isArray(rule.channels) ? rule.channels : []) as string[]).filter(
-    (ch) => ch !== 'email' || config.alertEmailEnabled,
-  );
+  const channels = effectiveChannels(rule);
   const channelsSent: string[] = [];
   const errors: string[] = [];
   const subject = `[${incident.severity.toUpperCase()}] ${project.name}: ${incident.title}`;

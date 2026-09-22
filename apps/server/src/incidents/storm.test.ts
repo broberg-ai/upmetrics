@@ -44,7 +44,11 @@ function addIncident(db: Db, projectId: string, kind = 'probe_down', severity = 
     .run();
   return id;
 }
-function addRule(db: Db, projectId: string, kind = '*', channels: string[] = ['email']): void {
+// F034 — kanalen er kulisse i denne fil; emnet er storm-kontrol. Standarden var
+// ['email'], og den kanal er slukket siden F034 (ALERT_EMAIL_ENABLED), så en
+// regel med kun email har nu ingen kanaler og leverer intet. Discord holder
+// opstillingen ved lige uden at røre det disse tests faktisk måler.
+function addRule(db: Db, projectId: string, kind = '*', channels: string[] = ['discord']): void {
   db.insert(schema.alertRules)
     .values({ id: `rule_${++seq}`, projectId, kind, condition: null, channels, enabled: true, createdAt: new Date() })
     .run();

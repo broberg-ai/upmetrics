@@ -107,6 +107,19 @@ describe('F034 — alarm-levering: mail slukket, og kun blodrødt slipper igenne
     expect(db.select().from(schema.alertHistory).all().length).toBe(0);
   });
 
+  it('en regel hvis ENESTE kanal er email leverer intet — og forgifter ikke dedup-vinduet', async () => {
+    const db = freshDb();
+    addProject(db, 'p6');
+    addRule(db, 'p6', '*', ['email']);
+    addIncident(db, 'p6', 'probe_down', 'critical');
+    const res = await runAlerts(db, new Date(0));
+    expect(res.fired).toBe(0);
+    expect(res.suppressed).toBe(1);
+    // Ingen række: alert_history ER dedup-lageret, så en «levering» der aldrig
+    // skete ville lukke munden på den ægte alarm en time frem.
+    expect(db.select().from(schema.alertHistory).all().length).toBe(0);
+  });
+
   it('en regel med email+discord leverer KUN discord, og mailer bliver aldrig kaldt', async () => {
     const db = freshDb();
     addProject(db, 'p5');
