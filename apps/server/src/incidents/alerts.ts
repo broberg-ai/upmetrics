@@ -47,6 +47,15 @@ export async function runAlerts(db: Db, now: Date = new Date(), control?: AlertC
     const project = db.select().from(schema.projects).where(eq(schema.projects.id, incident.projectId)).get();
     if (!project) continue;
 
+    // F034 — severity-gulv. Under gulvet leveres der intet, på nogen kanal. Det
+    // sidder her og ikke i detektionen: incidenten er stadig rejst, åben og
+    // synlig i dashboardet — den ringer bare ikke. Før control.suppress, fordi
+    // gulvet er ubetinget og ikke skal kunne omgås af storm-tilstanden.
+    if ((SEVERITY_RANK[incident.severity] ?? 0) < (SEVERITY_RANK[config.alertMinSeverity] ?? 0)) {
+      r.suppressed++;
+      continue;
+    }
+
     // F008.3 — fleet roll-up / maintenance suppression (whole incident).
     if (control) {
       const reason = control.suppress(incident, project);
@@ -121,7 +130,13 @@ async function deliver(
   incident: Incident,
   project: Project,
 ): Promise<{ channelsSent: string[]; errors: string[] }> {
-  const channels = (Array.isArray(rule.channels) ? rule.channels : []) as string[];
+  // F034 — mail er slukket med mindre ALERT_EMAIL_ENABLED=true. Frafiltreret FØR
+  // forsøget, ikke fanget som en fejl bagefter: et fejlet forsøg ville skrive en
+  // errors-linje i alert_history for hver eneste alarm, og så kan man ikke se
+  // forskel på «slukket med vilje» og «Resend er nede».
+  const channels = ((Array.isArray(rule.channels) ? rule.channels : []) as string[]).filter(
+    (ch) => ch !== 'email' || config.alertEmailEnabled,
+  );
   const channelsSent: string[] = [];
   const errors: string[] = [];
   const subject = `[${incident.severity.toUpperCase()}] ${project.name}: ${incident.title}`;

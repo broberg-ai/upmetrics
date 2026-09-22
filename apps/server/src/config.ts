@@ -102,6 +102,19 @@ export const config = {
   spikeWindowMs: coerceInt('SPIKE_WINDOW_MS', 300_000), // 5 min
   errorSpikeThreshold: coerceInt('ERROR_SPIKE_THRESHOLD', 10),
   agentFailureSpikeThreshold: coerceInt('AGENT_FAILURE_SPIKE_THRESHOLD', 5),
+  // F034 — alarm-LEVERING. To spærrer, begge på vej UD; detektionen er urørt, så
+  // en incident rejses og står i dashboardet uanset om den ringer.
+  //
+  // Mail er slukket. Christian, 22/9 2026: «Stop med mails helt». F033 gav alle
+  // 24 projekter en `kind='*'`-regel og FLEET_ALERT_EMAIL som fælles modtager,
+  // og så leverede mail-benet — hver eneste medium error_spike i flåden landede
+  // i hans indbakke. Login-mails (auth/email.ts) går ikke denne vej og er urørte.
+  alertEmailEnabled: process.env.ALERT_EMAIL_ENABLED === 'true',
+  // Severity-gulv: «Jeg vil have blod røde alerts ikke ubetydelige warnings».
+  // 14 fejl på 5 min er `medium` (correlation.ts) → tavs. 30+ er `high` (3× af
+  // errorSpikeThreshold) → den ringer. probe_down og kritisk eskalering er
+  // uberørte, de er høje i forvejen.
+  alertMinSeverity: process.env.ALERT_MIN_SEVERITY ?? 'high',
   // Alert engine (F005.2). Dedup window per (rule, incident, severity).
   alertDedupWindowMs: coerceInt('ALERT_DEDUP_WINDOW_MS', 3_600_000), // 1h
   // credit_low is a slow-moving balance state (rarely changes hour-to-hour) —
