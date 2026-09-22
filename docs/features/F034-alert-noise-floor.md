@@ -76,3 +76,20 @@ frem for en linje skrevet i forbifarten her.
   En kodeændring med en port er både reversibel og synlig.
 - **Nøgle dedup på ART frem for incident-id.** Ville dæmpe vippen, men skjuler også en ægte
   ny hændelse bag en gammel. Gulvet løser hans problem uden at gøre dedup mindre ærlig.
+
+## Reuse
+
+Discovery-tjek (F217) kørt for den ene kapacitet kortet rører: **udgående mail**.
+
+- `@broberg/mail` er **allerede adopteret** og er den eneste vej ud — `apps/server/src/mail.ts`
+  bygger den delte `createMailer`, og der findes præcis to kaldesteder i serveren
+  (`auth/email.ts`, `incidents/alerts.ts`). Ingen rå Resend-SDK, intet bart `fetch` mod
+  `api.resend.com`. Intet at migrere.
+- **Intet nyt at genbruge.** Kortet tilføjer ingen ny kapacitet — det er en politik for hvad
+  der må forlade huset, ikke en ny integration. En delt pakke til «hvilke alarmer fortjener
+  en besked» ville være en abstraktion over ét forbrugssted, altså præcis den slags
+  enkeltbrugs-abstraktion husreglerne forkaster.
+- **Discord-webhooken er hånd-rullet** (`sendDiscord` i `alerts.ts`, et `fetch` mod en
+  webhook-URL). Den er ældre end dette kort og uden for diffen, så den hører til sit eget
+  kort frem for en undtagelse skrevet her — men den er værd at kigge på næste gang nogen
+  rører leveringen: hvis flåden får en delt Discord-primitiv, er dette forbrugsstedet.
