@@ -107,6 +107,16 @@ describe('F034 — alarm-levering: mail slukket, og kun blodrødt slipper igenne
     expect(db.select().from(schema.alertHistory).all().length).toBe(0);
   });
 
+  it('en incident med en UKENDT severity ringer — gulvet må ikke tie den ihjel', async () => {
+    const db = freshDb();
+    addProject(db, 'p7');
+    addRule(db, 'p7', '*');
+    addIncident(db, 'p7', 'probe_down', 'urgent'); // en art ingen har set før
+    const res = await runAlerts(db, new Date(0));
+    expect(res.fired).toBe(1);
+    expect(res.suppressed).toBe(0);
+  });
+
   it('en regel hvis ENESTE kanal er email leverer intet — og forgifter ikke dedup-vinduet', async () => {
     const db = freshDb();
     addProject(db, 'p6');

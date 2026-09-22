@@ -19,6 +19,13 @@ type Project = typeof schema.projects.$inferSelect;
 
 const SEVERITY_RANK: Record<string, number> = { low: 1, medium: 2, high: 3, critical: 4 };
 
+// Rang for en severity-streng. `onUnknown` er kaldestedets beslutning om hvilken
+// vej en ukendt værdi skal fejle — den er ikke den samme for en incident som for
+// en indstilling, og en fælles default ville skjule at der er to valg.
+function severityRank(severity: string, onUnknown: number): number {
+  return SEVERITY_RANK[severity] ?? onUnknown;
+}
+
 export interface AlertResult {
   scannedIncidents: number;
   fired: number;
@@ -51,7 +58,13 @@ export async function runAlerts(db: Db, now: Date = new Date(), control?: AlertC
     // sidder her og ikke i detektionen: incidenten er stadig rejst, åben og
     // synlig i dashboardet — den ringer bare ikke. Før control.suppress, fordi
     // gulvet er ubetinget og ikke skal kunne omgås af storm-tilstanden.
-    if ((SEVERITY_RANK[incident.severity] ?? 0) < (SEVERITY_RANK[config.alertMinSeverity] ?? 0)) {
+    //
+    // BEGGE ukendte værdier fejler ÅBENT, og det er to forskellige beslutninger:
+    // en incident med en severity vi ikke kender lægges OVER gulvet (en alarm man
+    // ikke forstår skal ringe, ikke ties ihjel), og et ukendt ALERT_MIN_SEVERITY
+    // slår gulvet fra. En tastefejl må aldrig kunne gøre alarmsystemet tavst —
+    // det er netop den grønne-retning-fejl hele denne sag handlede om.
+    if (severityRank(incident.severity, Number.POSITIVE_INFINITY) < severityRank(config.alertMinSeverity, 0)) {
       r.suppressed++;
       continue;
     }
