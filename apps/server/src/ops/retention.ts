@@ -126,8 +126,10 @@ export function runRetention(db: Db, now: Date = new Date(), opts: RetentionOpti
 // prune above only moves pages onto SQLite's freelist: measured on prod 24/9,
 // 677 MB of a 777 MB file was free pages while `df` never moved.
 //
-// Bounded per tick because bun:sqlite is synchronous (1000 pages ≈ 50 ms on a
-// prod-shaped copy). Leftover pages are reused by new writes meanwhile.
+// Bounded per tick because bun:sqlite is synchronous. The budget and why it is
+// what it is live in ONE place, config.retentionReclaimPagesPerTick; reclaimMs in
+// the result is the prod measurement to tune it from. Leftover pages are reused by
+// new writes meanwhile.
 //
 // incremental_vacuum on a database that is NOT in INCREMENTAL mode is a silent
 // no-op — the job would look like it works while doing nothing, the exact failure
