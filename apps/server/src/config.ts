@@ -185,10 +185,15 @@ export const config = {
   retentionBootDelayMs: coerceInt('RETENTION_BOOT_DELAY_MS', 60_000), // 60s
   retentionBatchSize: coerceInt('RETENTION_BATCH_SIZE', 1000), // batched deletes (no long lock)
   // F025.2 — pages handed back to the filesystem per retention tick (incremental_vacuum).
-  // Bounded because bun:sqlite is synchronous: measured on a prod-shaped copy 24/9,
-  // 1000 pages ≈ 50 ms and 20000 ≈ 650 ms. What is left over is reused by new
-  // writes in the meantime and reclaimed on the next tick.
-  retentionReclaimPagesPerTick: coerceInt('RETENTION_RECLAIM_PAGES_PER_TICK', 10_000),
+  // Bounded because bun:sqlite is synchronous. Sized for PROD, not the laptop the
+  // first number came from: a Mac did 1000 pages in ~50 ms, but prod's one-time
+  // VACUUM ran ~10x slower per page than the same VACUUM on that Mac (22.2 s on
+  // prod vs 4.6 s on a copy twice as large). At 10,000/tick a big prune could have
+  // frozen the event loop for ~5 s — the /health timeout, i.e. the June stall.
+  // 1000 pages ≈ 4 MB/tick. Leftover pages are reused by new writes meanwhile, so a
+  // slow reclaim costs disk that is not needed, never an outage. `reclaimMs` in the
+  // retention log is the measured number to tune this from.
+  retentionReclaimPagesPerTick: coerceInt('RETENTION_RECLAIM_PAGES_PER_TICK', 1000),
   probeCompactionDays: coerceInt('PROBE_COMPACTION_DAYS', 7), // downsample probe_results to hourly after
   ingestWarnIntervalMs: coerceInt('INGEST_WARN_INTERVAL_MS', 60_000), // dedup the over-limit warning event
   // Auto-remediation relay (F010). Buddy (local) polls /api/remediation/pending

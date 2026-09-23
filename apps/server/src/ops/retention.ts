@@ -20,6 +20,8 @@ export interface RetentionResult {
   eventsCapped: number;
   /** F025.2 — free pages handed back to the filesystem this tick (incremental_vacuum). */
   pagesReclaimed: number;
+  /** F025.2 — how long the reclaim held the (synchronous) event loop, measured on prod. */
+  reclaimMs: number;
   /**
    * F025.2 — one line per write whose effect could not be confirmed: it removed
    * fewer rows than it selected, or the driver gave no readable count. Empty is
@@ -87,7 +89,7 @@ export interface RetentionOptions {
 }
 
 export function runRetention(db: Db, now: Date = new Date(), opts: RetentionOptions = {}): RetentionResult {
-  const r: RetentionResult = { eventsDeleted: 0, agentRunsDeleted: 0, probeResultsCompacted: 0, eventsCapped: 0, pagesReclaimed: 0, anomalies: [] };
+  const r: RetentionResult = { eventsDeleted: 0, agentRunsDeleted: 0, probeResultsCompacted: 0, eventsCapped: 0, pagesReclaimed: 0, reclaimMs: 0, anomalies: [] };
   const batch = config.retentionBatchSize;
   const cap = opts.maxEventsPerProject ?? config.maxEventsPerProject;
 
@@ -114,7 +116,9 @@ export function runRetention(db: Db, now: Date = new Date(), opts: RetentionOpti
   }
 
   r.probeResultsCompacted += compactProbeResults(db, now, r.anomalies);
+  const t0 = performance.now();
   r.pagesReclaimed = reclaimFreePages(db, opts.reclaimPagesPerTick ?? config.retentionReclaimPagesPerTick, r.anomalies);
+  r.reclaimMs = Math.round(performance.now() - t0);
   return r;
 }
 
