@@ -6,6 +6,11 @@ import { eq, isNull, sql } from 'drizzle-orm';
 
 export function createDb(path: string = process.env.DATABASE_PATH ?? './local.db') {
   const sqlite = new Database(path);
+  // F025.2 — a NEW database is born able to give freed pages back to the disk.
+  // This only takes effect on a database with no tables yet; an existing one is
+  // converted once at boot (db/vacuum.ts, run from migrate.ts). Set before WAL
+  // so it precedes anything that could write the first page.
+  sqlite.exec('PRAGMA auto_vacuum = INCREMENTAL;');
   sqlite.exec('PRAGMA journal_mode = WAL;');
   // Wait up to 5s for a lock to clear instead of throwing "database is locked"
   // immediately — absorbs transient contention from WAL checkpoints + the

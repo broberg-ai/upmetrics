@@ -184,6 +184,11 @@ export const config = {
   // fixes that; the short delay lets the server start serving first.
   retentionBootDelayMs: coerceInt('RETENTION_BOOT_DELAY_MS', 60_000), // 60s
   retentionBatchSize: coerceInt('RETENTION_BATCH_SIZE', 1000), // batched deletes (no long lock)
+  // F025.2 — pages handed back to the filesystem per retention tick (incremental_vacuum).
+  // Bounded because bun:sqlite is synchronous: measured on a prod-shaped copy 24/9,
+  // 1000 pages ≈ 50 ms and 20000 ≈ 650 ms. What is left over is reused by new
+  // writes in the meantime and reclaimed on the next tick.
+  retentionReclaimPagesPerTick: coerceInt('RETENTION_RECLAIM_PAGES_PER_TICK', 10_000),
   probeCompactionDays: coerceInt('PROBE_COMPACTION_DAYS', 7), // downsample probe_results to hourly after
   ingestWarnIntervalMs: coerceInt('INGEST_WARN_INTERVAL_MS', 60_000), // dedup the over-limit warning event
   // Auto-remediation relay (F010). Buddy (local) polls /api/remediation/pending

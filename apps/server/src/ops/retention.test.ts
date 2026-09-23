@@ -4,7 +4,12 @@ import { migrate } from 'drizzle-orm/bun-sqlite/migrator';
 import { eq, sql } from 'drizzle-orm';
 import { createDb, schema, type Db } from '../db';
 import { config } from '../config';
-import { runRetention } from './retention';
+import { runRetention, reclaimFreePages } from './retention';
+import { Database } from 'bun:sqlite';
+import { drizzle } from 'drizzle-orm/bun-sqlite';
+import { rmSync, statSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 
 const MIGRATIONS = new URL('../db/migrations', import.meta.url).pathname;
 const DAY = 86_400_000;
@@ -299,5 +304,85 @@ describe('F025.2 a prune that removes nothing must not report success', () => {
     expect(r.probeResultsCompacted).toBe(0);
     expect(db.select().from(schema.probeResults).all().length).toBe(4); // nothing lost
     expect(r.anomalies.some((a) => a.includes('probe_results'))).toBe(true);
+  });
+});
+
+// F025.2 — the prune must give the space back, not only move it to a freelist.
+// Against a REAL file: the claim is about the disk, and measured on prod 24/9 the
+// rows were gone while 677 MB of a 777 MB file sat as free pages.
+describe('F025.2 — prune giver pladsen tilbage til disken', () => {
+  const pragma = (db: Db, p: string) => Number((db.all(sql.raw(`PRAGMA ${p}`))[0] as Record<string, unknown>)[p]);
+  function fileDb(): { db: Db; path: string; done: () => void } {
+    const path = join(tmpdir(), `retention-${process.pid}-${++seq}.db`);
+    const db = createDb(path);
+    migrate(db, { migrationsFolder: MIGRATIONS });
+    return { db, path, done: () => { for (const s of ['', '-wal', '-shm']) rmSync(path + s, { force: true }); } };
+  }
+  function addFatEvents(db: Db, projectId: string, n: number): void {
+    for (let i = 0; i < n; i++) {
+      const ts = new Date(NOW.getTime() - (n - i) * 1000);
+      db.insert(schema.events)
+        .values({ id: `ev_${++seq}`, projectId, kind: 'error', receivedAt: ts, occurredAt: ts, payload: { blob: 'x'.repeat(3000) } })
+        .run();
+    }
+  }
+
+  it('en ny base fødes INCREMENTAL — ingen omlægning nødvendig', () => {
+    const { db, done } = fileDb();
+    expect(pragma(db, 'auto_vacuum')).toBe(2);
+    done();
+  });
+
+  it('efter prune falder freelist til 0, og FILEN er målbart mindre efter checkpoint', () => {
+    const { db, path, done } = fileDb();
+    addProject(db, 'flooder');
+    addFatEvents(db, 'flooder', 1500);
+    db.run(sql`PRAGMA wal_checkpoint(TRUNCATE)`);
+    const sizeBefore = statSync(path).size;
+
+    const res = runRetention(db, NOW, { maxEventsPerProject: 100, reclaimPagesPerTick: 1_000_000 });
+
+    expect(res.eventsCapped).toBe(1400);
+    expect(res.pagesReclaimed).toBeGreaterThan(0);
+    expect(pragma(db, 'freelist_count')).toBe(0);
+    expect(res.anomalies).toEqual([]);
+    // The file itself. wal_autocheckpoint is off in the app, so the truncation
+    // reaches the file at the next checkpoint — which Litestream / the WAL valve take.
+    db.run(sql`PRAGMA wal_checkpoint(TRUNCATE)`);
+    expect(statSync(path).size).toBeLessThan(sizeBefore / 2);
+    done();
+  });
+
+  it('budgettet holdes — én tick giver højst sit loft tilbage, resten tages næste gang', () => {
+    const { db, done } = fileDb();
+    addProject(db, 'flooder');
+    addFatEvents(db, 'flooder', 1500);
+    const r1 = runRetention(db, NOW, { maxEventsPerProject: 100, reclaimPagesPerTick: 50 });
+    expect(r1.pagesReclaimed).toBe(50);
+    expect(pragma(db, 'freelist_count')).toBeGreaterThan(0);
+    const r2 = runRetention(db, NOW, { maxEventsPerProject: 100, reclaimPagesPerTick: 1_000_000 });
+    expect(r2.pagesReclaimed).toBeGreaterThan(0);
+    expect(pragma(db, 'freelist_count')).toBe(0);
+    done();
+  });
+
+  // The silent no-op this card exists for: incremental_vacuum on a NONE database
+  // does nothing and raises nothing. It must be REPORTED.
+  it('en base der IKKE står i INCREMENTAL giver en anomali — aldrig en tavs no-op', () => {
+    const path = join(tmpdir(), `retention-none-${process.pid}-${++seq}.db`);
+    const raw = new Database(path);
+    raw.exec('PRAGMA auto_vacuum = NONE; CREATE TABLE t (id INTEGER PRIMARY KEY, blob TEXT);');
+    for (let i = 0; i < 200; i++) raw.run('INSERT INTO t (blob) VALUES (?)', ['x'.repeat(3000)]);
+    raw.exec('DELETE FROM t');
+    const db = drizzle(raw) as unknown as Db;
+    const anomalies: string[] = [];
+
+    const reclaimed = reclaimFreePages(db, 1_000_000, anomalies);
+
+    expect(reclaimed).toBe(0);
+    expect(anomalies.length).toBe(1);
+    expect(anomalies[0]).toContain('auto_vacuum=0');
+    raw.close();
+    for (const s of ['', '-wal', '-shm']) rmSync(path + s, { force: true });
   });
 });

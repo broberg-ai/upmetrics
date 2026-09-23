@@ -18,6 +18,8 @@ export interface RetentionResult {
   probeResultsCompacted: number;
   /** F025.2 — events dropped by the per-project cap, not by age. */
   eventsCapped: number;
+  /** F025.2 — free pages handed back to the filesystem this tick (incremental_vacuum). */
+  pagesReclaimed: number;
   /**
    * F025.2 — one line per write whose effect could not be confirmed: it removed
    * fewer rows than it selected, or the driver gave no readable count. Empty is
@@ -80,10 +82,12 @@ function batchedDelete(
 export interface RetentionOptions {
   /** Override the per-project event cap (tests inject a small one; prod uses config). */
   maxEventsPerProject?: number;
+  /** Override the per-tick incremental_vacuum budget (tests; prod uses config). */
+  reclaimPagesPerTick?: number;
 }
 
 export function runRetention(db: Db, now: Date = new Date(), opts: RetentionOptions = {}): RetentionResult {
-  const r: RetentionResult = { eventsDeleted: 0, agentRunsDeleted: 0, probeResultsCompacted: 0, eventsCapped: 0, anomalies: [] };
+  const r: RetentionResult = { eventsDeleted: 0, agentRunsDeleted: 0, probeResultsCompacted: 0, eventsCapped: 0, pagesReclaimed: 0, anomalies: [] };
   const batch = config.retentionBatchSize;
   const cap = opts.maxEventsPerProject ?? config.maxEventsPerProject;
 
@@ -110,7 +114,41 @@ export function runRetention(db: Db, now: Date = new Date(), opts: RetentionOpti
   }
 
   r.probeResultsCompacted += compactProbeResults(db, now, r.anomalies);
+  r.pagesReclaimed = reclaimFreePages(db, opts.reclaimPagesPerTick ?? config.retentionReclaimPagesPerTick, r.anomalies);
   return r;
+}
+
+// F025.2 — hand the pages this tick freed back to the filesystem. Without it the
+// prune above only moves pages onto SQLite's freelist: measured on prod 24/9,
+// 677 MB of a 777 MB file was free pages while `df` never moved.
+//
+// Bounded per tick because bun:sqlite is synchronous (1000 pages ≈ 50 ms on a
+// prod-shaped copy). Leftover pages are reused by new writes meanwhile.
+//
+// incremental_vacuum on a database that is NOT in INCREMENTAL mode is a silent
+// no-op — the job would look like it works while doing nothing, the exact failure
+// this card exists for. So that case is reported as an anomaly, never assumed.
+// With the file shrinking only at the next checkpoint (wal_autocheckpoint is off;
+// Litestream and the WAL valve own that), freelist_count is the honest measure.
+export function reclaimFreePages(db: Db, budgetPages: number, anomalies: string[]): number {
+  // db.all, not db.get: drizzle's bun-sqlite .get() returns the row as an ARRAY
+  // of values ([2]), so reading it by column name yields undefined → NaN, and
+  // every comparison below would quietly be false. Measured 24/9.
+  const read = (p: string) => Number((db.all(sql.raw(`PRAGMA ${p}`))[0] as Record<string, unknown> | undefined)?.[p]);
+  const before = read('freelist_count');
+  if (!(before > 0) || budgetPages <= 0) return 0;
+  const mode = read('auto_vacuum');
+  if (mode !== 2) {
+    anomalies.push(`vacuum: auto_vacuum=${mode}, ikke INCREMENTAL — ${before} frie sider kan ikke gives tilbage til disken`);
+    return 0;
+  }
+  db.run(sql.raw(`PRAGMA incremental_vacuum(${Math.floor(budgetPages)})`));
+  const after = read('freelist_count');
+  if (!(after < before)) {
+    anomalies.push(`vacuum: incremental_vacuum kørte, men freelist stod stille (${before} → ${after})`);
+    return 0;
+  }
+  return before - after;
 }
 
 // F025.2 — enforce the per-project event ceiling. Time-based retention bounds
@@ -226,7 +264,7 @@ export function startRetentionWorker(): void {
   const tick = () => {
     try {
       const res = runRetention(getDb());
-      if (res.eventsDeleted || res.agentRunsDeleted || res.probeResultsCompacted || res.eventsCapped) {
+      if (res.eventsDeleted || res.agentRunsDeleted || res.probeResultsCompacted || res.eventsCapped || res.pagesReclaimed) {
         console.log('[retention]', JSON.stringify(res));
       }
       // An unconfirmed write is louder than a busy tick, and it is reported
