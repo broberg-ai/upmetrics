@@ -25,6 +25,7 @@ jobs:
   test:
     name: typecheck + test
     runs-on: ubuntu-latest
+    timeout-minutes: 5 # F008.8 — målt max 43 s. Gulv på 5 min: under det bliver en langsom runner til en falsk rød.
     steps:
       - uses: actions/checkout@v4
       - uses: pnpm/action-setup@v4
@@ -53,6 +54,7 @@ jobs:
     needs: test # ← THE GATE. Red tests ⇒ no deploy.
     if: github.ref == 'refs/heads/main' && github.event_name != 'pull_request'
     runs-on: ubuntu-latest
+    timeout-minutes: 10 # F008.8 — målt max 74 s (20 kørsler). Uden grænse venter GitHub 360 min, og concurrency holder alle senere udrulninger i kø bag en hængende.
     concurrency: deploy-upmetrics # never two deploys of the same app at once
     steps:
       - uses: actions/checkout@v4

@@ -27,6 +27,7 @@ on:
 jobs:
   enroll:
     runs-on: ubuntu-latest
+    timeout-minutes: 5 # F008.8 — målt max 23 s.
     permissions:
       contents: read
       id-token: write # lets GitHub mint the token that proves which repo this is
